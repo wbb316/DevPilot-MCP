@@ -100,7 +100,7 @@ Additions shipped with the implementation (additions are allowed, renames are no
 ```
 `data`: `{ query, engine, confidence, truncated, total, definitions: SymbolHit[],
            references: ReferenceHit[] }`
-Errors: `INDEX_FAILED`, `WORKSPACE_NOT_OPEN`.
+Errors: `INDEX_FAILED`, `WORKSPACE_NOT_OPEN`, `PATH_OUTSIDE_WORKSPACE`.
 
 ### `find_references` — RO
 ```ts
@@ -112,7 +112,16 @@ Errors: `INDEX_FAILED`, `WORKSPACE_NOT_OPEN`.
 Notes that apply to both Phase 3 tools:
 
 - `path` is a **filter**, not a workspace selector: it restricts results to files under a
-  workspace-relative prefix. The workspace itself comes from `open_workspace`.
+  workspace-relative prefix, while the workspace itself comes from `open_workspace`. The registry
+  still resolves a `path` argument as a workspace target first — that part is shared with every
+  other tool — so an absolute path inside the open workspace arrives here as a filter.
+- The workspace root — absolute, drive-qualified (`D:\tools\...`), or `.` — means "the whole
+  workspace", **not** "match nothing"; a real subdirectory (`src`, `src\catalog`, relative or
+  absolute) still narrows. A filtered search that finds nothing names the filter in `warnings`
+  (`path filter "tests"`) instead of looking like a missing symbol, and a path outside the
+  workspace is an error (`PATH_OUTSIDE_WORKSPACE`, or `WORKSPACE_NOT_FOUND` when the registry
+  rejects it before the handler runs). Verified live: passing the workspace root used to answer
+  "No definition found" for a symbol that existed.
 - Matching tiers for `find_symbol`: exact name → `Container.member` (parent-qualified) →
   name prefix → name substring. Default is case-insensitive; `caseSensitive: true` opts out.
 - Both return `engine: "text"` and `extractor: "heuristic-regex"` (lexical, not a compiler)

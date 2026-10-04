@@ -15,15 +15,20 @@ DSH does not read a `mcpServers` block. Each MCP server is one **plugin entry** 
 DSH's own MCP client bridge:
 
 ```yaml
-- id: mcp-devpilot
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: devpilot
-    transport: stdio
-    command: node
-    args: ['D:\tools\DevPilot-MCP\dist\index.js', 'serve']
-    cwd: 'D:\tools\DevPilot-MCP'
-    toolCallTimeoutMs: 300000
+# `insert:` is required. A bare `- id: ...` row only patches a row that an already-loaded
+# bundle inserted, so a new plugin declared that way is a silent no-op — the first attempt
+# on this machine looked like "the profile needs a restart" for exactly that reason.
+- insert:
+    - id: mcp-devpilot
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: devpilot
+        transport: stdio
+        command: node
+        args: ['D:\tools\DevPilot-MCP\dist\index.js', 'serve']
+        cwd: 'D:\tools\DevPilot-MCP'
+        toolCallTimeoutMs: 300000
+        failOnStartupError: true
 ```
 
 | Field | Meaning | DevPilot value |
@@ -54,9 +59,12 @@ Consequences to remember:
 2. Smoke the exact command DSH will run, from an empty stdin:
    `node dist\index.js serve` must answer an `initialize` + `tools/list` handshake and exit on EOF.
    Covered by `tests/integration/mcp-stdio.test.ts` (it drives a real SDK client over stdio).
-3. Add the plugin entry above to the DSH profile that should own DevPilot, then restart / reload
-   that profile and confirm the tools appear in the model's tool list.
-4. Run the V1 acceptance script (docs/ROADMAP.md Phase 10) against a real project.
+3. Add the plugin entry above to the DSH profile that should own DevPilot, as an `insert:` row.
+   DSH's `@deepseek-ai/dsh-hmr` row reloads profile config, so no restart was needed on this
+   machine: the entry, the spawned server process and the model-facing tools all appeared in the
+   running session (verified 2026-10-05). Confirm with the three signals in "Live wiring" below.
+4. Run the V1 acceptance script (docs/ROADMAP.md Phase 10) against a real project — and also run
+   the loop by hand through the bridge, because that is the path the agent actually takes.
 
 ## V1 acceptance script → who answers it
 
@@ -101,11 +109,28 @@ uncommitted user edit):
 
 Raw envelopes: `docs/evidence/recon.json`, `verify.json`, `post.json`, `rollback.json`.
 
-Item 1 of the table above ("connected to DSH") is verified at the level DSH itself uses — the exact
-`command` / `args` / `cwd` from the profile entry, handshake, `tools/list`, clean exit on EOF — plus
-the profile entry parsing as YAML with all 11 entries intact. The tools become visible in a live
-model session only after DSH restarts, because the profile is read at harness start.
+## Live wiring (2026-10-05)
+
+Item 1 of the table above used to be verified only indirectly (the exact `command` / `args` / `cwd`,
+handshake, `tools/list`, clean exit on EOF, plus the entry parsing as YAML). It is now verified
+against the running harness at three levels of increasing strength:
+
+| Signal | How it was read | Observed |
+| --- | --- | --- |
+| loader entry | host Config inspect, filtered by plugin package name | `include:mcp-devpilot`, patchId `mcp-devpilot`, status `schema` |
+| server process | `Win32_Process` filtered to `*DevPilot-MCP*` | `pid=1672 node D:\tools\DevPilot-MCP\dist\index.js serve` |
+| model tool surface | this agent's own callable tool list | 19 `mcp__devpilot__*` tools + the `devpilot` MCP resource server |
+
+Two corrections came out of that session and are reflected above: the entry must be an `insert:`
+row, and no DSH restart is needed (HMR reloads the profile config).
+
+The acceptance loop then ran **through the bridge** rather than through `tools/v1-acceptance.mjs`:
+`scan_project` → `find_symbol`/`find_references` → failing suite as structured counts → `diagnose_failure`
+(category, location, evidence) → `create_checkpoint` → fix → `run_tests` green 5/5 → `review_diff`.
+That run also exposed the `path`-filter defect fixed in the same commit: passing the workspace root
+to `find_symbol`/`find_references` matched no file and answered "no definition found" for a symbol
+that existed. See the Phase 3 notes in docs/TOOLS.md.
 
 Where the entry lives on this machine: `C:\Users\王贝波\.dsh\profiles\desktop\cordis.patch.yml`
-(backed up next to it as `cordis.patch.yml.bak-devpilot-*` before the edit). The block is inserted
-before the `managed - do not edit` webserver section so that section stays byte-identical.
+(backed up next to it as `cordis.patch.yml.bak-devpilot-*` before the edit). The block sits before
+the `managed - do not edit` webserver section so that section stays byte-identical.

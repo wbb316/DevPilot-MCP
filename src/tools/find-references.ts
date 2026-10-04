@@ -4,7 +4,7 @@ import { defineTool } from '../server/tool-registry.js';
 import { ok } from '../errors/envelope.js';
 import { errors } from '../errors/devpilot-error.js';
 import { acquireSymbolIndex } from '../code/index-registry.js';
-import { normalizePathFilter, pathFilterSchema } from './shared.js';
+import { pathFilterSchema, resolvePathFilter } from './shared.js';
 import { requireWorkspaceContext } from './scan-project.js';
 
 /**
@@ -58,7 +58,11 @@ export const findReferencesTool = defineTool({
     }
     context.ctx.workspaces.setIndexState(workspace.id, report.indexState);
 
-    const pathFilter = normalizePathFilter(args.path);
+    const resolvedFilter = resolvePathFilter(args.path, workspace.root);
+    if (resolvedFilter.outside !== undefined) {
+      throw errors.pathOutsideWorkspace(resolvedFilter.outside, workspace.root);
+    }
+    const pathFilter = resolvedFilter.filter;
     const answer = await index.findReferences(args.name, {
       ...(pathFilter === undefined ? {} : { pathFilter }),
       ...(args.includeText === undefined ? {} : { includeText: args.includeText }),
@@ -79,6 +83,11 @@ export const findReferencesTool = defineTool({
       );
     }
     if (answer.result.total === 0) {
+      if (pathFilter !== undefined) {
+        warnings.push(
+          `no reference matched under the path filter "${pathFilter}" — usage may exist elsewhere in the workspace; drop or widen \`path\``,
+        );
+      }
       warnings.push(
         'a lexical index can miss dynamic usage (getattr, reflection, string-built names): absence of references is not proof of dead code',
       );

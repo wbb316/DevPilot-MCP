@@ -6,7 +6,7 @@ import { errors } from '../errors/devpilot-error.js';
 import { acquireSymbolIndex } from '../code/index-registry.js';
 import type { ReferenceHit, SymbolKind } from '../types/code.js';
 import { SYMBOL_KINDS } from '../types/code.js';
-import { normalizePathFilter, pathFilterSchema } from './shared.js';
+import { pathFilterSchema, resolvePathFilter } from './shared.js';
 import { requireWorkspaceContext } from './scan-project.js';
 
 /**
@@ -59,7 +59,11 @@ export const findSymbolTool = defineTool({
     }
     context.ctx.workspaces.setIndexState(workspace.id, report.indexState);
 
-    const pathFilter = normalizePathFilter(args.path);
+    const resolvedFilter = resolvePathFilter(args.path, workspace.root);
+    if (resolvedFilter.outside !== undefined) {
+      throw errors.pathOutsideWorkspace(resolvedFilter.outside, workspace.root);
+    }
+    const pathFilter = resolvedFilter.filter;
     const search = index.findSymbols(args.name, {
       ...(args.kind === undefined ? {} : { kinds: args.kind as SymbolKind[] }),
       ...(pathFilter === undefined ? {} : { pathFilter }),
@@ -86,7 +90,9 @@ export const findSymbolTool = defineTool({
     const warnings = [...report.notes];
     if (search.total === 0) {
       warnings.push(
-        'no definition matched: check the spelling, or run scan_project { force: true } if the file was just added',
+        pathFilter === undefined
+          ? 'no definition matched: check the spelling, or run scan_project { force: true } if the file was just added'
+          : `no definition matched under the path filter "${pathFilter}" — the symbol may exist elsewhere in the workspace; drop or widen \`path\``,
       );
     } else if (first?.doc === undefined && first?.signature === undefined) {
       warnings.push('the matched definition has no signature/doc extracted (lexical parser)');

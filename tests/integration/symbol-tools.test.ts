@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -153,6 +155,43 @@ describe('Phase 3 tools through the registry', () => {
     expect(missData.confidence).toBe('low');
     const warnings = envelopeOf<ReferenceData>(miss).warnings ?? [];
     expect(warnings.some((warning) => warning.includes('lexical'))).toBe(true);
+  }, 60_000);
+
+  it('reads a workspace-root path as "the whole workspace" instead of matching nothing', async () => {
+    const atRoot = await invokeTool(context, findSymbolTool, {
+      name: 'CausalSelfAttention',
+      path: workspace,
+    });
+    expect(atRoot.isError).toBe(false);
+    const atRootData = envelopeOf<SymbolData>(atRoot).data as SymbolData;
+    expect(atRootData.total).toBeGreaterThanOrEqual(1);
+    expect(atRootData.definitions[0]?.name).toBe('CausalSelfAttention');
+
+    const dot = await invokeTool(context, findSymbolTool, { name: 'CausalSelfAttention', path: '.' });
+    expect((envelopeOf<SymbolData>(dot).data as SymbolData).total).toBe(atRootData.total);
+
+    // A real subdirectory still narrows, and an empty result says which filter emptied it.
+    const narrowed = await invokeTool(context, findSymbolTool, {
+      name: 'CausalSelfAttention',
+      path: 'tests',
+    });
+    const narrowedData = envelopeOf<SymbolData>(narrowed).data as SymbolData;
+    expect(narrowedData.total).toBe(0);
+    const narrowedWarnings = envelopeOf<SymbolData>(narrowed).warnings ?? [];
+    expect(narrowedWarnings.some((warning) => warning.includes('path filter "tests"'))).toBe(true);
+
+    // Outside the workspace is an explicit error, never a confident "nothing found". Which
+    // layer says so depends on the path: the registry resolves `path` as a workspace target
+    // before the handler runs (WORKSPACE_NOT_FOUND), and the handler's own guard covers a path
+    // that reaches it but lies outside the resolved root (PATH_OUTSIDE_WORKSPACE).
+    const outside = await invokeTool(context, findSymbolTool, {
+      name: 'CausalSelfAttention',
+      path: path.dirname(workspace),
+    });
+    expect(outside.isError).toBe(true);
+    expect(['WORKSPACE_NOT_FOUND', 'PATH_OUTSIDE_WORKSPACE']).toContain(
+      envelopeOf<SymbolData>(outside).error?.code,
+    );
   }, 60_000);
 
   it('closes the workspace without leaving the index unusable', async () => {
