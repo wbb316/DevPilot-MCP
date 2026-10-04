@@ -147,6 +147,14 @@ interface SearchResult<T> { engine: 'ast' | 'text'; confidence: 'high' | 'medium
                             truncated: boolean; total: number; results: T[] }
 ```
 
+Two clarifications fixed with Phase 3:
+
+- `containerName` names the enclosing scope of a reference: the enclosing **type** for the
+  Java and TypeScript/JavaScript extractors, the enclosing **block** (function or class) for
+  Python.
+- `ReferenceRecord` and `ImportEdge` carry a `path`. `file_id` exists only in the SQLite
+  schema and is resolved at the storage boundary, so the in-memory model has no id coupling.
+
 ## 5. Execution types
 
 ```ts

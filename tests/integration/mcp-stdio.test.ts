@@ -20,9 +20,10 @@ interface Envelope {
   error?: { code: string; message: string; hint?: string };
 }
 
-function envelopeOf(result: { content: unknown; structuredContent?: unknown }): Envelope {
-  if (result.structuredContent) return result.structuredContent as Envelope;
-  const content = result.content as { type: string; text?: string }[];
+function envelopeOf(result: unknown): Envelope {
+  const value = result as { structuredContent?: unknown; content?: unknown };
+  if (value.structuredContent) return value.structuredContent as Envelope;
+  const content = Array.isArray(value.content) ? (value.content as { type: string; text?: string }[]) : [];
   const text = content.find((item) => item.type === 'text')?.text ?? '{}';
   return JSON.parse(text) as Envelope;
 }

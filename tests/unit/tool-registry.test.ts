@@ -95,12 +95,16 @@ describe('tool registry', () => {
       'close_workspace',
       'scan_project',
       'get_project_map',
+      'find_symbol',
+      'find_references',
     ]);
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {},
     );
     expect(registered.sort()).toEqual([
       'close_workspace',
+      'find_references',
+      'find_symbol',
       'get_project_map',
       'get_workspace_status',
       'open_workspace',

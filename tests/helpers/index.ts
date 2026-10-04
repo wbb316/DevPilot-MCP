@@ -9,8 +9,16 @@ export async function makeTempDir(prefix = 'devpilot-test-'): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
+/**
+ * Best-effort removal of a throwaway directory. A file still held open (Windows) must never
+ * turn into a test failure or a long retry loop: the directory is temporary either way.
+ */
 export async function removeDir(dir: string): Promise<void> {
-  await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  try {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    /* temporary directory: leaving a remnant behind is acceptable */
+  }
 }
 
 export async function writeFiles(root: string, files: Record<string, string>): Promise<void> {

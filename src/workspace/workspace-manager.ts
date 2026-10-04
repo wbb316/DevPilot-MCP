@@ -265,6 +265,14 @@ export class WorkspaceManager {
     entry.state.lastUsedAt = new Date().toISOString();
   }
 
+  /** Record the outcome of an index refresh on the live session state (Phase 3). */
+  setIndexState(id: string, indexState: IndexState): void {
+    const entry = this.open.get(id);
+    if (entry === undefined) return;
+    entry.state.indexState = indexState;
+    entry.state.lastUsedAt = new Date().toISOString();
+  }
+
   /** Resolve the workspace a tool call refers to, or throw a typed error. */
   async resolveEntry(target?: string): Promise<OpenEntry> {
     const trimmed = (target ?? '').trim();

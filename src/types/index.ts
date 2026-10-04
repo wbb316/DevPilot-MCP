@@ -23,3 +23,20 @@ export type {
   CloseWorkspaceData,
 } from './workspace.js';
 export { PERMISSION_LEVELS } from './workspace.js';
+
+export type {
+  SymbolKind,
+  ReferenceKind,
+  Visibility,
+  SearchEngine,
+  SearchConfidence,
+  FileRecord,
+  SymbolRecord,
+  ReferenceRecord,
+  ImportEdge,
+  IndexMeta,
+  SymbolHit,
+  ReferenceHit,
+  SearchResult,
+} from './code.js';
+export { SYMBOL_KINDS, REFERENCE_KINDS } from './code.js';

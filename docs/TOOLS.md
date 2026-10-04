@@ -109,6 +109,20 @@ Errors: `INDEX_FAILED`, `WORKSPACE_NOT_OPEN`.
 `data`: `{ query, engine, confidence, truncated, total, references: ReferenceHit[],
            definition?: SymbolHit, grouped: { path, count, lines: number[] }[] }`
 
+Notes that apply to both Phase 3 tools:
+
+- `path` is a **filter**, not a workspace selector: it restricts results to files under a
+  workspace-relative prefix. The workspace itself comes from `open_workspace`.
+- Matching tiers for `find_symbol`: exact name → `Container.member` (parent-qualified) →
+  name prefix → name substring. Default is case-insensitive; `caseSensitive: true` opts out.
+- Both return `engine: "text"` and `extractor: "heuristic-regex"` (lexical, not a compiler)
+  plus an `index` block (`state`, `store: "sqlite" | "json"`, `files`, `symbols`, `refs`,
+  `parsed`, `reused`) so the caller can judge how much to trust a negative answer.
+- The index refreshes incrementally on every call (mtime+size); `parsed: 0` means the tree
+  was unchanged. `scan_project { force: true }` is the full-rebuild escape hatch.
+- Everything skipped is reported in `warnings` (unsupported language, oversized file, parse
+  error, per-file reference cap) — never dropped silently.
+
 ---
 
 ## Phase 4

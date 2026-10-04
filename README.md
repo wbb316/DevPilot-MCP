@@ -132,14 +132,16 @@ with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `PAT
 
 ## Status
 
-**Phase 2 — project scanner + project map: gate passed** (Phase 1: skeleton, MCP server,
-workspace lifecycle — also passed).
+**Phase 3 — symbol & reference index: gate passed** (Phase 1 skeleton/workspace lifecycle and
+Phase 2 scanner/project map also passed).
 
 ```text
-npm run build   clean (TypeScript strict)
-npm test        15 test files / 120 tests green, incl. a real MCP stdio integration test
-devpilot serve  an MCP client initializes, lists 5 tools, opens/scans/maps a workspace
-devpilot scan   the DevPilot repo itself: 88 files / 420 KB in 38 ms, 2 ms on the cache hit
+tsc -p tsconfig.json --noEmit   clean (strict); src and tests are both typechecked
+npm test                        19 test files / 146 tests green
+npm run smoke                   self-hosting (this repo as target): 87 files indexed,
+                                1694 symbols, 5854 refs; SymbolIndex → src/code/symbol-index.ts:152;
+                                39 refs to DevPilotError in 4 files; second call parsed=0 reused=87
+2000-file synthetic project     first index 472 ms; re-query 56 ms (parsed=0 reused=2000)
 ```
 
 Implemented so far: strict TS project · typed error model + result envelope · DevPilot
@@ -149,12 +151,16 @@ workspace manager (open / status / close, registry, project detection, git snaps
 ignore-aware file walker (own `.gitignore` engine, no external glob dependency) ·
 project scanner (profile, statistics, top-level map, `.devpilot/cache/project.json`) ·
 project map (entrypoints, modules, symbols, `dependsOn`/`usedBy` edges, Java layer hints) ·
+symbol index (Python/Java/TypeScript/JavaScript lexical extractors behind a `LanguageParser`
+seam, real scope end-lines, per-file `mtime+size` incrementality, SQLite store
+`.devpilot/devpilot.db` with a JSON fallback, reference kinds + resolved import edges) ·
 MCP server with tool registry (`open_workspace`, `get_workspace_status`, `close_workspace`,
-`scan_project`, `get_project_map`) · CLI (`init`, `scan`, `status`, `serve`, `version`) ·
+`scan_project`, `get_project_map`, `find_symbol`, `find_references`) ·
+CLI (`init`, `scan`, `status`, `serve`, `version`) · `npm run smoke` end-to-end script ·
 three fixture projects.
 
-Next: Phase 3 (`find_symbol`, `find_references` — AST-backed symbol index with incremental
-`mtime+size` re-parsing). See [docs/ROADMAP.md](docs/ROADMAP.md) for per-phase gates.
+Next: Phase 4 (`build_project`, `run_project` — the single process gate with timeouts,
+output caps and per-run logs). See [docs/ROADMAP.md](docs/ROADMAP.md) for per-phase gates.
 
 ## License
 

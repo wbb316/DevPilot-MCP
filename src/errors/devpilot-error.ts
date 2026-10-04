@@ -102,6 +102,13 @@ export const errors = {
       hint: 'This tool exists in the roadmap but is not part of the current phase.',
     });
   },
+  indexFailed(message: string, details?: unknown): DevPilotError {
+    return new DevPilotError('INDEX_FAILED', message, {
+      details,
+      retryable: true,
+      hint: 'Re-run scan_project { force: true }; if it persists, the details name the failing file.',
+    });
+  },
   gitNotAvailable(detail?: string): DevPilotError {
     return new DevPilotError(
       'GIT_NOT_AVAILABLE',

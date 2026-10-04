@@ -1,5 +1,6 @@
 import type { LogLevel, Logger } from '../log/logger.js';
 import { createLogger } from '../log/logger.js';
+import { closeAllSymbolIndexes } from '../code/index-registry.js';
 import { devpilotHome, ensureHomeLayout, globalLogFile } from '../storage/paths.js';
 import { VERSION } from '../version.js';
 import { WorkspaceManager } from '../workspace/workspace-manager.js';
@@ -44,6 +45,15 @@ export class ServerContext {
   }
 
   async dispose(): Promise<void> {
+    // Flush and release every open symbol index: a live SQLite handle would otherwise
+    // outlive the session and block the workspace directory (docs/DATA-MODEL.md §9).
+    try {
+      await closeAllSymbolIndexes();
+    } catch (error) {
+      this.logger.warn('failed to close symbol indexes during dispose', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     this.logger.info('server context disposed', { openWorkspaces: this.workspaces.listOpen().length });
   }
 }

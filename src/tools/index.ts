@@ -1,5 +1,7 @@
 import type { AnyToolDefinition } from '../server/tool-registry.js';
 import { closeWorkspaceTool } from './close-workspace.js';
+import { findReferencesTool } from './find-references.js';
+import { findSymbolTool } from './find-symbol.js';
 import { getProjectMapTool } from './get-project-map.js';
 import { getWorkspaceStatusTool } from './get-workspace-status.js';
 import { openWorkspaceTool } from './open-workspace.js';
@@ -19,6 +21,8 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   closeWorkspaceTool,
   scanProjectTool,
   getProjectMapTool,
+  findSymbolTool,
+  findReferencesTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */

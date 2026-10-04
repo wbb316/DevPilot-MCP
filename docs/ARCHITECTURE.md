@@ -115,10 +115,16 @@ Tools never claim "the fix works". They report exit codes, test counts, timings,
 memory, diff risk and let the calling agent conclude.
 
 ### 4.4 Search backends with graceful degradation
-`find_symbol` prefers AST (Tree-sitter grammars available for Python/Java/TS/JS).
-When a grammar or the native module is unavailable, DevPilot degrades to a
-word-boundary text index built in-process and marks `confidence: "low"` plus
-`engine: "text"` in the result — accuracy is never faked.
+`find_symbol` / `find_references` answer from the per-workspace index
+(`.devpilot/devpilot.db`, JSON fallback under `.devpilot/cache/`). Phase 3 ships
+**lexical extractors** under `code/lang/*` (Python, Java, TypeScript/JavaScript) and
+therefore reports `engine: "text"` plus `extractor: "heuristic-regex"` in every result: a
+lexical index is not a compiler, and the tool says so instead of implying precision it does
+not have. The extractors sit behind the `LanguageParser` seam (`code/parsed.ts`), so a
+Tree-sitter adapter can replace one language at a time without touching the index, the tools
+or any field name; until then the project needs no native build step on any platform
+(Windows first). `confidence` is derived from what was actually found — a definition plus
+call sites is `high`, a bare textual match is `low` — never asserted.
 
 ### 4.5 Processes have exactly one gate
 All command execution flows through `runner/process-runner.ts`:

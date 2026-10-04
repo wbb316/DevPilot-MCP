@@ -35,7 +35,9 @@
     "serve": "node dist/index.js serve",
     "pretest": "npm run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:fixture": "node scripts/smoke.mjs fixtures/python-project"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
