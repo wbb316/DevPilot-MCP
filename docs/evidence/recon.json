@@ -1,7 +1,7 @@
 {
   "stage": "recon",
   "target": "D:/Projects/devpilot-demo",
-  "generatedAt": "2026-10-04T15:50:35.083Z",
+  "generatedAt": "2026-10-04T16:05:21.740Z",
   "serverCommand": "node dist/index.js serve",
   "passed": 8,
   "failed": 0,
@@ -105,7 +105,7 @@
       "description": "create_checkpoint records a reversible checkpoint before any edit",
       "pass": true,
       "detail": {
-        "checkpointId": "ck-20261004-155035-2s72",
+        "checkpointId": "ck-20261004-160521-bens",
         "note": "snapshotted 2 of 2 changed file(s) at commit a49c40c; rollback writes this content back and never deletes files created afterwards"
       }
     }

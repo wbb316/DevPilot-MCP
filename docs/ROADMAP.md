@@ -303,8 +303,8 @@ consistent versions.
 Gate evidence (`tools/v1-acceptance.mjs`, four stages, workspace `D:\Projects\devpilot-demo`):
 
 * `recon` 8/8 · `verify` 2/2 · `post` 5/5 · `rollback` 7/7 — 22 checks, 0 failures; raw envelopes
-  in `docs/evidence/{recon,verify,post,rollback}.json`, after `tsc` exit 0 and 43 files / 346 tests
-  green.
+  in `docs/evidence/{recon,verify,post,rollback}.json`. Re-run after the last source change, so all
+  three stacks carry evidence from one revision: `tsc` exit 0, 45 files / 359 tests green.
 * Language stacks (`tools/stack-acceptance.mjs`): **maven 13/13** and **node 13/13**, each running
   the full loop on a real toolchain (Java 17 through Maven 3.9.11, Node 22 `node --test`) with a
   real defect, a real fix and a real rollback; raw envelopes in `docs/evidence/{maven,node}.json`.
@@ -316,6 +316,11 @@ Gate evidence (`tools/v1-acceptance.mjs`, four stages, workspace `D:\Projects\de
 * Wiring: profile `desktop` (`cordis.patch.yml`, backed up first) with
   `@deepseek-ai/dsh-mcp-client`; the exact stdio command DSH spawns answers the handshake in
   397 ms with 19 tools and exits cleanly on stdin EOF (`tools/mcp-probe.mjs`).
+* Activation boundary, recorded rather than hidden: `plugin_manager list_plugins` on the running
+  desktop profile returns 217 active entries and none of them is `mcp-devpilot`. DSH loads profile
+  entries at harness start, so the entry is present and schema-valid but needs a restart before
+  `mcp__devpilot__*` reaches the model. Until then, acceptance item 1 holds at config + process
+  level only.
 * Three defects the real project found that the unit suite did not: f-string interpolations were
   masked as string bodies (a call site vanished), the entry-point list never looked inside a
   package (empty run command, and a src-layout project cannot be started as a path at all), and a

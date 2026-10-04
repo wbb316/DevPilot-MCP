@@ -1,7 +1,7 @@
 {
   "stage": "verify",
   "target": "D:/Projects/devpilot-demo",
-  "generatedAt": "2026-10-04T15:50:36.906Z",
+  "generatedAt": "2026-10-04T16:05:23.605Z",
   "serverCommand": "node dist/index.js serve",
   "passed": 2,
   "failed": 0,

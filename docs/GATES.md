@@ -473,5 +473,32 @@ The acceptance evidence showed `error: |-` as a diagnostic *evidence* line: `nod
 "error" and "assert" while saying nothing. They are now filtered — but only the key-with-machine-
 value shapes, so `error: Expected 1 to be 2` stays, because there the text is the evidence.
 
+## Phase 10c — Same-version re-run, and the activation boundary
+
+The four Python stages were re-run against the build produced *after* the Phase 10b fixes, so all
+three stacks now carry evidence from one source revision
+(`node tools\v1-acceptance.mjs --stage=<stage> --out=docs/evidence/<stage>.json`):
+
+```
+recon    8/8   tools/list 19 · open · scan · run command · find_symbol · find_references · impact · checkpoint
+verify   2/2   failing suite with real counts · structured diagnosis (category + location + evidence)
+post     5/5   passing suite · run_project actually starts it · diff review with patch · pre-existing change flagged
+rollback 7/7   dry-run · real restore · suite red again · user's README note intact · git index untouched
+```
+
+The demo repo ends exactly as the user left it: `git status --short` lists ` M README.md` and
+` M src/catalog/service.py` (the second is git's racily-clean false positive) while `git diff --stat`
+lists only `README.md | 5 ++++-` — DevPilot's own edit was rolled back byte for byte, and the other
+change is the user's.
+
+### The activation boundary, recorded rather than hidden
+
+`plugin_manager list_plugins` against the running desktop profile returns 217 active entries and
+**none of them is `mcp-devpilot`**. DSH reads profile plugin entries at harness start, so the entry
+written into `cordis.patch.yml` is present and schema-valid but not yet loaded by the running host.
+The stdio contract itself is proven independently (`tools/mcp-probe.mjs`: 19 tools, handshake, clean
+exit on stdin EOF), which is why the remaining step is a restart — a human action, not a DevPilot
+defect. Until that restart, acceptance item 1 is satisfied at config + process level only.
+
 
 
