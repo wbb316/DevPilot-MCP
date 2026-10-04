@@ -8,6 +8,7 @@ import {
   hashContent,
   openPersistence,
 } from '../../src/code/index-store';
+import { EXTRACTOR_VERSION } from '../../src/code/extract';
 import { workspacePaths } from '../../src/storage/paths';
 import { makeTempDir, removeDir } from '../helpers/index';
 
@@ -15,6 +16,7 @@ function snapshot(): IndexSnapshot {
   return {
     meta: {
       schemaVersion: INDEX_SCHEMA_VERSION,
+      extractorVersion: EXTRACTOR_VERSION,
       rootHash: 'abc123',
       indexedAt: '2025-01-01T00:00:00.000Z',
       fileCount: 1,
@@ -100,6 +102,20 @@ describe('index persistence', () => {
       const persistence = new JsonPersistence(file);
       const stale = snapshot();
       stale.meta.schemaVersion = INDEX_SCHEMA_VERSION + 1;
+      await persistence.save(stale);
+      expect(await persistence.load()).toBeUndefined();
+    } finally {
+      await removeDir(dir);
+    }
+  });
+
+  it('refuses a snapshot written by an older extractor (Phase 10: mtime+size cannot see a better parser)', async () => {
+    const dir = await makeTempDir('devpilot-store-extractor-');
+    try {
+      const file = path.join(dir, 'index.json');
+      const persistence = new JsonPersistence(file);
+      const stale = snapshot();
+      stale.meta.extractorVersion = EXTRACTOR_VERSION - 1;
       await persistence.save(stale);
       expect(await persistence.load()).toBeUndefined();
     } finally {

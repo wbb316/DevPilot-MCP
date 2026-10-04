@@ -103,6 +103,80 @@ const ENTRYPOINT_CANDIDATES: readonly string[] = [  'train.py',
   'src/main.rs',
 ];
 
+/**
+ * Entry-point shaped file names, most likely first. Real projects keep their entry point
+ * inside a package (`src/catalog/cli.py`), which the fixed candidate list above cannot see —
+ * the Phase 10 real-project run found such a project with an empty `candidates.run`.
+ */
+const ENTRYPOINT_NAMES: readonly string[] = [
+  'main.py',
+  'cli.py',
+  '__main__.py',
+  'app.py',
+  'run.py',
+  'server.py',
+  'manage.py',
+  'train.py',
+  'sample.py',
+  'index.ts',
+  'index.js',
+  'main.ts',
+  'main.js',
+  'server.ts',
+  'server.js',
+  'app.ts',
+  'app.js',
+];
+
+const MAX_DISCOVERED_ENTRYPOINTS = 8;
+
+function isTestPath(relative: string): boolean {
+  if (/(^|\/)(tests?|spec|specs|__tests__)\//.test(relative)) return true;
+  return /[._](test|spec)\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(relative);
+}
+
+/** Entry points discovered anywhere under the source tree, not only at the hard-coded paths. */
+function discoverEntrypoints(files: readonly string[], already: readonly string[]): string[] {
+  const seen = new Set(already);
+  const found: { path: string; rank: number; depth: number }[] = [];
+  for (const file of files) {
+    if (seen.has(file) || isTestPath(file)) continue;
+    const base = file.split('/').pop() ?? '';
+    const rank = ENTRYPOINT_NAMES.indexOf(base);
+    if (rank === -1) continue;
+    found.push({ path: file, rank, depth: file.split('/').length });
+  }
+  found.sort(
+    (a, b) =>
+      a.rank - b.rank || a.depth - b.depth || a.path.length - b.path.length || a.path.localeCompare(b.path),
+  );
+  return found.slice(0, MAX_DISCOVERED_ENTRYPOINTS).map((entry) => entry.path);
+}
+
+/**
+ * How to run a Python file. A file inside a package can only be started as `python -m pkg.mod`
+ * (a relative import inside it breaks `python path/to/file.py` — measured on the demo project),
+ * and the directory above the outermost package must be on `PYTHONPATH`.
+ */
+function pythonRunTarget(
+  relative: string,
+  files: readonly string[],
+): { target: string; pythonPath?: string } {
+  const segments = relative.split('/');
+  const file = segments.pop() ?? relative;
+  const moduleName = file.replace(/\.py$/, '');
+  const parts: string[] = [];
+  let current = segments.join('/');
+  while (current !== '' && files.includes(`${current}/__init__.py`)) {
+    const lastSlash = current.lastIndexOf('/');
+    parts.unshift(lastSlash === -1 ? current : current.slice(lastSlash + 1));
+    current = lastSlash === -1 ? '' : current.slice(0, lastSlash);
+  }
+  if (parts.length === 0) return { target: relative };
+  const modulePath = moduleName === '__main__' ? parts.join('.') : [...parts, moduleName].join('.');
+  return current === '' ? { target: `-m ${modulePath}` } : { target: `-m ${modulePath}`, pythonPath: current };
+}
+
 const SOURCE_DIR_CANDIDATES: readonly string[] = [
   'src',
   'src/main/java',
@@ -450,7 +524,8 @@ export async function detectProject(
 
   if (options.config?.project.type) projectType = options.config.project.type;
 
-  const entrypoints = await existingRelative(root, ENTRYPOINT_CANDIDATES);
+  const rootEntrypoints = await existingRelative(root, ENTRYPOINT_CANDIDATES);
+  const entrypoints = [...rootEntrypoints, ...discoverEntrypoints(files, rootEntrypoints)];
   const sourceDirs = await existingRelative(root, SOURCE_DIR_CANDIDATES);
   const testDirs = await existingRelative(root, TEST_DIR_CANDIDATES);
   const configDirs = await existingRelative(root, CONFIG_DIR_CANDIDATES);
@@ -459,6 +534,7 @@ export async function detectProject(
     buildSystem,
     framework,
     entrypoints,
+    files,
     testFramework,
     scripts: node.scripts,
     config: options.config,
@@ -505,14 +581,25 @@ interface CommandInputs {
   buildSystem: string;
   framework?: string;
   entrypoints: readonly string[];
+  files: readonly string[];
   testFramework: string;
   scripts: Record<string, string>;
   config?: DevPilotConfig;
 }
 
 /** Deterministic command inference, overridable through .devpilot/config.yml. */
-function inferCommands(inputs: CommandInputs): { build?: string; test?: string; run?: string } {
-  const candidates: { build?: string; test?: string; run?: string } = {};
+function inferCommands(inputs: CommandInputs): {
+  build?: string;
+  test?: string;
+  run?: string;
+  runEnv?: Record<string, string>;
+} {
+  const candidates: {
+    build?: string;
+    test?: string;
+    run?: string;
+    runEnv?: Record<string, string>;
+  } = {};
 
   switch (inputs.buildSystem) {
     case 'maven':
@@ -533,15 +620,23 @@ function inferCommands(inputs: CommandInputs): { build?: string; test?: string; 
       if (inputs.scripts['test'] !== undefined) candidates.test = `${manager} test`;
       if (inputs.scripts['start'] !== undefined) candidates.run = `${manager} start`;
       else if (inputs.scripts['dev'] !== undefined) candidates.run = `${manager} run dev`;
+      else if (inputs.entrypoints[0] !== undefined) candidates.run = `node ${inputs.entrypoints[0]}`;
       break;
     }
     case 'pip':
-    case 'poetry':
-      candidates.test = `${inputs.buildSystem === 'poetry' ? 'poetry run ' : ''}python -m pytest -q`;
-      if (inputs.entrypoints[0] !== undefined) {
-        candidates.run = `${inputs.buildSystem === 'poetry' ? 'poetry run ' : ''}python ${inputs.entrypoints[0]}`;
+    case 'poetry': {
+      const prefix = inputs.buildSystem === 'poetry' ? 'poetry run ' : '';
+      candidates.test = `${prefix}python -m pytest -q`;
+      const entry = inputs.entrypoints[0];
+      if (entry !== undefined) {
+        const target = pythonRunTarget(entry, inputs.files);
+        candidates.run = `${prefix}python ${target.target}`;
+        if (target.pythonPath !== undefined) {
+          candidates.runEnv = { PYTHONPATH: target.pythonPath };
+        }
       }
       break;
+    }
     default:
       break;
   }
@@ -551,9 +646,15 @@ function inferCommands(inputs: CommandInputs): { build?: string; test?: string; 
   if (project?.test_command) candidates.test = project.test_command;
   if (project?.run_command) candidates.run = project.run_command;
 
-  const cleaned: { build?: string; test?: string; run?: string } = {};
+  const cleaned: {
+    build?: string;
+    test?: string;
+    run?: string;
+    runEnv?: Record<string, string>;
+  } = {};
   if (candidates.build !== undefined) cleaned.build = candidates.build;
   if (candidates.test !== undefined) cleaned.test = candidates.test;
   if (candidates.run !== undefined) cleaned.run = candidates.run;
+  if (candidates.runEnv !== undefined) cleaned.runEnv = candidates.runEnv;
   return cleaned;
 }

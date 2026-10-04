@@ -262,6 +262,28 @@ export class GitManager {
     return undefined;
   }
 
+  /** True when `filePath` exists in the tree of `ref` — the checkpoint baseline probe. */
+  async pathExistsAtRef(ref: string, filePath: string): Promise<boolean> {
+    const result = await this.run(['cat-file', '-e', `${ref}:${filePath}`], { allowFailure: true });
+    return result.exitCode === 0;
+  }
+
+  /**
+   * Content of `filePath` as of `ref`, or undefined when that tree has no such path.
+   * Rollback needs this for files that were *clean* when the checkpoint was taken: their
+   * pre-edit content is the recorded commit, not a snapshot. Reading a blob never touches
+   * the index, and `git show` does not apply smudge filters, so extraction is lossless.
+   */
+  async contentAtRef(ref: string, filePath: string, maxBytes = 8_388_608): Promise<string | undefined> {
+    if (!(await this.pathExistsAtRef(ref, filePath))) return undefined;
+    const result = await this.run(['show', `${ref}:${filePath}`], {
+      allowFailure: true,
+      maxStdoutBytes: maxBytes,
+    });
+    if (result.exitCode !== 0) return undefined;
+    return result.stdout;
+  }
+
   /**
    * Reverse-applies a checkpoint patch, optionally limited to specific paths.
    * `checkOnly` probes without touching the working tree — the safe way to find out

@@ -17,7 +17,7 @@ import type {
   SymbolKind,
   SymbolRecord,
 } from '../types/code.js';
-import { extractFile, supportsLanguage } from './extract.js';
+import { EXTRACTOR_VERSION, extractFile, supportsLanguage } from './extract.js';
 import type { IndexPersistence, IndexSnapshot } from './index-store.js';
 import {
   INDEX_SCHEMA_VERSION,
@@ -458,6 +458,7 @@ export class SymbolIndex {
     for (const list of this.importsByFile.values()) imports.push(...list);
     const meta: IndexMeta = {
       schemaVersion: INDEX_SCHEMA_VERSION,
+      extractorVersion: EXTRACTOR_VERSION,
       rootHash: hashContent(
         `${this.options.root}|${this.options.config.index.languages.join(',')}|${this.filesByPath.size}`,
       ),

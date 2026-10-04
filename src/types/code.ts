@@ -96,6 +96,8 @@ export interface ImportEdge {
 
 export interface IndexMeta {
   schemaVersion: number;
+  /** Bumped whenever the extractors change: mtime+size cannot see a better parser (Phase 10). */
+  extractorVersion: number;
   rootHash: string;
   indexedAt: string;
   fileCount: number;

@@ -83,6 +83,38 @@ describe('checkpoints and rollback against a real repository', () => {
     }
   }, 60_000);
 
+  it('undoes edits to a file that was clean when the checkpoint was taken (Phase 10)', async () => {
+    const repo = await repository();
+    if (repo === undefined) return;
+    const { root, paths, git } = repo;
+    try {
+      // The user's own uncommitted work is present *before* the checkpoint.
+      await fs.writeFile(path.join(root, 'user-notes.txt'), 'my own uncommitted work\n', 'utf8');
+
+      const created = await createCheckpoint({ paths, git, kind: 'pre_write', label: 'before the fix' });
+      expect(created.checkpoint.files).toEqual(['user-notes.txt']);
+      expect(created.checkpoint.files).not.toContain('a.txt');
+
+      // The agent now edits the tracked file that was clean at checkpoint time. A checkpoint that
+      // only snapshots the files dirty at creation cannot undo this — its baseline is the commit.
+      await edit(root, 'line 2', 'line 2 AGENT-EDIT');
+      expect(normalize(await readText(path.join(root, 'a.txt')))).toContain('line 2 AGENT-EDIT');
+
+      const dry = await rollbackCheckpoint({ paths, git, checkpointId: created.checkpoint.id, dryRun: true });
+      expect(dry.restored).toContain('a.txt');
+      expect(normalize(await readText(path.join(root, 'a.txt')))).toContain('line 2 AGENT-EDIT');
+
+      const real = await rollbackCheckpoint({ paths, git, checkpointId: created.checkpoint.id });
+      expect(real.restored).toContain('a.txt');
+      expect(real.unchanged).toContain('user-notes.txt');
+      expect(normalize(await readText(path.join(root, 'a.txt')))).toBe(normalize(ORIGINAL));
+      expect(await readText(path.join(root, 'user-notes.txt'))).toBe('my own uncommitted work\n');
+      expect(real.notes?.some((note) => note.includes('left alone'))).toBe(true);
+    } finally {
+      await removeDir(root);
+    }
+  }, 60_000);
+
   it('records a clean tree as a checkpoint with nothing to restore', async () => {
     const repo = await repository();
     if (repo === undefined) return;
@@ -173,7 +205,10 @@ describe('checkpoints and rollback against a real repository', () => {
       expect(created.note).toContain('.devpilot path(s) ignored');
 
       const result = await rollbackCheckpoint({ paths, git, checkpointId: created.checkpoint.id });
-      expect(result.restored).toEqual(['a.txt']);
+      // Nothing changed after the checkpoint, so nothing is rewritten: reporting a write that did
+      // not happen would be noise. `.devpilot/` is still nobody's rollback target.
+      expect(result.restored).toEqual([]);
+      expect(result.unchanged).toEqual(['a.txt']);
       expect(result.skipped).toEqual([]);
       // DevPilot's own config is still there: it is not part of anyone's rollback.
       expect(normalize(await readText(path.join(paths.devpilotDir, 'config.yml')))).toContain('execute: true');

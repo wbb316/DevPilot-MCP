@@ -84,7 +84,9 @@ export interface ProjectProfile {
   testDirs: string[];
   configDirs: string[];
   /** rule-inferred commands, never LLM-generated */
-  candidates: { build?: string; test?: string; run?: string };
+  /** Rule-based command candidates. `runEnv` carries environment the candidate needs (Phase 10: a
+   *  src-layout Python package is only importable as `python -m pkg.mod` with `PYTHONPATH=src`). */
+  candidates: { build?: string; test?: string; run?: string; runEnv?: Record<string, string> };
   /** ISO timestamp */
   detectedAt: string;
 }

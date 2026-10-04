@@ -293,6 +293,20 @@ Notes fixed with Phase 7:
 - A restore writes the platform's line endings (`core.autocrlf`), matching the rest of the
   checkout; that is git behaviour, not an artefact of DevPilot.
 
+Notes fixed with Phase 10 (real-project acceptance):
+
+- `rollback_checkpoint` also undoes edits to files that were **clean** when the checkpoint was
+  taken, using the commit the checkpoint recorded as their baseline. A pre-write checkpoint has no
+  snapshot for such files, so without this an agent's edit survived its own rollback.
+- `data.unchanged[]` lists paths that already matched the checkpoint or the recorded commit, so
+  `restored` never claims a write that did not happen — a user's pre-existing edit is reported as
+  left alone, not as "restored".
+- A rollback never writes a file it cannot reconstruct, never rewrites a binary file, and keeps the
+  file's own line-ending convention (a restore must not become a whole-file CRLF diff).
+- `project.candidates.runEnv` (additive) carries environment the run command needs: a src-layout
+  Python project is only importable as `python -m pkg.mod` with `PYTHONPATH=<src>`. `run_project`
+  applies it and says so in its notes; without it the inferred command fails like a user bug.
+
 ---
 
 ## Phase 8

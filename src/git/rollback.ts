@@ -38,6 +38,8 @@ export interface RollbackOutcome {
   restored: string[];
   skipped: string[];
   protectedUserChanges: string[];
+  /** Paths whose content already matched the checkpoint / recorded commit: nothing was written. */
+  unchanged: string[];
   dryRun: boolean;
   notes: string[];
 }
@@ -59,6 +61,25 @@ async function exists(file: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readText(file: string): Promise<string | undefined> {
+  try {
+    return (await fs.readFile(file)).toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function looksBinary(text: string): boolean {
+  return text.includes('\0');
+}
+
+/** Equal ignoring line-ending style: git stores LF in the blob while the tree may hold CRLF. */
+function sameText(current: string, baseline: string): boolean {
+  return (
+    current === baseline || current.replace(/\r\n/g, '\n') === baseline.replace(/\r\n/g, '\n')
+  );
 }
 
 export async function rollbackCheckpoint(input: RollbackInput): Promise<RollbackOutcome> {
@@ -89,6 +110,16 @@ export async function rollbackCheckpoint(input: RollbackInput): Promise<Rollback
   const restored: string[] = [];
   const skipped: string[] = [];
   const protectedUserChanges: string[] = [];
+  const unchanged: string[] = [];
+
+  // Files that are dirty *now* but were clean when the checkpoint was taken. A pre-write
+  // checkpoint has no snapshot for them, yet undoing this session's edit is exactly what a
+  // rollback is for — their baseline is the commit the checkpoint recorded (Phase 10 fix:
+  // the acceptance run found the agent's edit surviving its own rollback).
+  const editedSinceCheckpoint = [...statuses.entries()]
+    .filter(([entry, xy]) => xy !== '??' && !checkpoint.files.includes(entry) && !isProtectedPath(entry))
+    .map(([entry]) => entry)
+    .sort();
 
   const snapshotRoot = checkpointSnapshotDir(paths, checkpoint.id);
   const patchPath = await store.patchPath(checkpoint);
@@ -108,6 +139,14 @@ export async function rollbackCheckpoint(input: RollbackInput): Promise<Rollback
     const snapshot = path.join(snapshotRoot, 'files', file.split('/').join(path.sep));
 
     if (await exists(snapshot)) {
+      const snapshotText = await fs.readFile(snapshot, 'utf8');
+      const currentText = await readText(target);
+      if (currentText !== undefined && currentText === snapshotText) {
+        // Already holds the recorded content (the user's own pre-existing edit): leave it alone
+        // instead of rewriting an identical file and calling it a restore.
+        unchanged.push(file);
+        continue;
+      }
       if (dryRun) {
         restored.push(file);
         continue;
@@ -149,6 +188,50 @@ export async function rollbackCheckpoint(input: RollbackInput): Promise<Rollback
     notes.push(`${file} has no snapshot and is not covered by the patch — nothing to restore`);
   }
 
+  for (const file of editedSinceCheckpoint) {
+    if (checkpoint.head === '') {
+      skipped.push(file);
+      notes.push(
+        `${file} was clean at checkpoint time but the checkpoint sits on an unborn branch — no commit to restore from`,
+      );
+      continue;
+    }
+    const target = path.join(paths.root, file.split('/').join(path.sep));
+    const baseline = await git.contentAtRef(checkpoint.head, file);
+    if (baseline === undefined) {
+      skipped.push(file);
+      notes.push(
+        `${file} did not exist in ${checkpoint.head.slice(0, 7)} — it appeared after the checkpoint and is left in place`,
+      );
+      continue;
+    }
+    const current = await readText(target);
+    if (current !== undefined && looksBinary(current)) {
+      skipped.push(file);
+      notes.push(`${file} looks binary — refusing to rewrite it from the recorded commit`);
+      continue;
+    }
+    // git stores LF; the checkout may hold CRLF. Match the file's own convention so a restore
+    // does not turn into a whole-file line-ending diff.
+    const restoredText = (current?.includes('\r\n') ?? false) ? baseline.replace(/\n/g, '\r\n') : baseline;
+    if (current !== undefined && sameText(current, restoredText)) {
+      unchanged.push(file);
+      continue;
+    }
+    if (dryRun) {
+      restored.push(file);
+      continue;
+    }
+    try {
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, restoredText, 'utf8');
+      restored.push(file);
+    } catch (error) {
+      skipped.push(file);
+      notes.push(`${file} could not be written: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   const appeared = [...statuses.keys()].filter(
     (entry) => statuses.get(entry) === '??' && !checkpoint.files.includes(entry) && !entry.startsWith('.devpilot'),
   );
@@ -159,6 +242,11 @@ export async function rollbackCheckpoint(input: RollbackInput): Promise<Rollback
   }
   if (restored.length > 0) {
     notes.push('the git index was left untouched: restored files are unstaged working-tree content');
+  }
+  if (unchanged.length > 0) {
+    notes.push(
+      `${unchanged.length} file(s) already matched the checkpoint or the recorded commit and were left alone: ${unchanged.slice(0, 5).join(', ')}${unchanged.length > 5 ? ', …' : ''}`,
+    );
   }
   if (checkpoint.snapshotSkipped !== undefined && checkpoint.snapshotSkipped.length > 0) {
     notes.push(
@@ -173,5 +261,5 @@ export async function rollbackCheckpoint(input: RollbackInput): Promise<Rollback
     protected: protectedUserChanges.length,
   });
 
-  return { checkpoint, restored, skipped, protectedUserChanges, dryRun, notes };
+  return { checkpoint, restored, skipped, protectedUserChanges, unchanged, dryRun, notes };
 }

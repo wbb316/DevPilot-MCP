@@ -1,0 +1,78 @@
+{
+  "stage": "verify",
+  "target": "D:/Projects/devpilot-demo",
+  "generatedAt": "2026-10-04T15:50:36.906Z",
+  "serverCommand": "node dist/index.js serve",
+  "passed": 2,
+  "failed": 0,
+  "checks": [
+    {
+      "item": 7,
+      "description": "run_tests returns structured counts for the failing suite",
+      "pass": true,
+      "detail": {
+        "status": "failed",
+        "total": 5,
+        "passed": 3,
+        "failed": 2,
+        "framework": "pytest",
+        "command": "python -m pytest -p no:cacheprovider",
+        "failures": [
+          {
+            "name": "test_average_price_of_input_devices",
+            "message": "assert 3245.0 == 6490.0 ± 0.00649",
+            "path": "tests/test_service.py",
+            "line": 13,
+            "stackHead": [
+              "assert 3245.0 == 6490.0 ± 0.00649",
+              "comparison failed",
+              "Obtained: 3245.0"
+            ]
+          },
+          {
+            "name": "test_total_price_covers_every_product",
+            "message": "TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'",
+            "path": "tests/test_service.py",
+            "line": 23,
+            "stackHead": [
+              "TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "item": 8,
+      "description": "diagnose_failure turns the raw log into a category, a location and evidence",
+      "pass": true,
+      "detail": {
+        "category": "TYPE_ERROR",
+        "confidence": "medium",
+        "location": {
+          "path": "tests/test_service.py",
+          "line": 13
+        },
+        "evidence": [
+          "tests/test_service.py:13 | assert make_service().average_price(\"input\") == pytest.approx(6490.0)",
+          ">       assert make_service().average_price(\"input\") == pytest.approx(6490.0)",
+          "E       assert 3245.0 == 6490.0 ± 0.00649"
+        ],
+        "suspectFiles": [
+          {
+            "path": "tests/test_service.py",
+            "reason": "in_stack"
+          },
+          {
+            "path": "src/catalog/service.py",
+            "reason": "in_stack"
+          },
+          {
+            "path": "README.md",
+            "reason": "recently_changed"
+          }
+        ],
+        "hint": "A type mismatch: align the declared and actual types at the reported location, or widen the signature deliberately."
+      }
+    }
+  ]
+}

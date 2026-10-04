@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { ensureDir } from '../storage/paths.js';
 import { readJson, writeJsonAtomic } from '../storage/json-store.js';
+import { EXTRACTOR_VERSION } from './extract.js';
 import type { WorkspacePaths } from '../types/workspace.js';
 import type {
   FileRecord,
@@ -115,6 +116,7 @@ class SqlitePersistence implements IndexPersistence {
       if (metaRaw === undefined) return undefined;
       const meta = JSON.parse(asString(metaRaw['value'])) as IndexMeta;
       if (meta.schemaVersion !== INDEX_SCHEMA_VERSION) return undefined;
+      if (meta.extractorVersion !== EXTRACTOR_VERSION) return undefined;
 
       const files: FileRecord[] = (
         this.db
@@ -278,6 +280,7 @@ class SqlitePersistence implements IndexPersistence {
         'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       );
       setMeta.run('schema_version', String(INDEX_SCHEMA_VERSION));
+      setMeta.run('extractor_version', String(EXTRACTOR_VERSION));
       setMeta.run('snapshot', JSON.stringify(snapshot.meta));
 
       db.exec('COMMIT');
@@ -312,6 +315,7 @@ export class JsonPersistence implements IndexPersistence {
     const snapshot = result.value;
     if (snapshot === undefined || snapshot === null) return undefined;
     if (snapshot.meta?.schemaVersion !== INDEX_SCHEMA_VERSION) return undefined;
+    if (snapshot.meta?.extractorVersion !== EXTRACTOR_VERSION) return undefined;
     return snapshot;
   }
 

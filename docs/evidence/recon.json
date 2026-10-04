@@ -1,0 +1,113 @@
+{
+  "stage": "recon",
+  "target": "D:/Projects/devpilot-demo",
+  "generatedAt": "2026-10-04T15:50:35.083Z",
+  "serverCommand": "node dist/index.js serve",
+  "passed": 8,
+  "failed": 0,
+  "checks": [
+    {
+      "item": 1,
+      "description": "tools/list exposes the V1 tool set over stdio (19 tools)",
+      "pass": true,
+      "detail": {
+        "missing": [],
+        "names": [
+          "build_project",
+          "close_workspace",
+          "create_checkpoint",
+          "dependency_audit",
+          "diagnose_failure",
+          "doctor",
+          "find_references",
+          "find_symbol",
+          "get_git_status",
+          "get_project_map",
+          "get_workspace_status",
+          "impact_analysis",
+          "open_workspace",
+          "review_diff",
+          "rollback_checkpoint",
+          "run_project",
+          "run_test",
+          "run_tests",
+          "scan_project"
+        ]
+      }
+    },
+    {
+      "item": 2,
+      "description": "open_workspace opens the real Git project D:/Projects/devpilot-demo",
+      "pass": true,
+      "detail": [
+        "workspace",
+        "createdDevpilotDir",
+        "configPath",
+        "gitNotice"
+      ]
+    },
+    {
+      "item": 3,
+      "description": "scan_project identifies languages, markers and statistics",
+      "pass": true,
+      "detail": {
+        "languages": [
+          "Python"
+        ],
+        "files": 11,
+        "topLevel": 6
+      }
+    },
+    {
+      "item": 4,
+      "description": "the project answers \"how do I run this?\" from the scan alone",
+      "pass": true,
+      "detail": {
+        "run": "python -m catalog.cli",
+        "test": "python -m pytest -q",
+        "buildSystem": "pip",
+        "testFramework": "pytest"
+      }
+    },
+    {
+      "item": 5,
+      "description": "find_symbol locates CatalogService in its defining file",
+      "pass": true,
+      "detail": "1 definition(s) for \"CatalogService\"; first at src/catalog/service.py:9 (class), 4 reference(s)."
+    },
+    {
+      "item": 5.1,
+      "description": "find_references finds call sites across files (definition + tests + cli)",
+      "pass": true,
+      "detail": {
+        "summary": "2 reference(s) to \"average_price\" in 2 file(s); defined at src/catalog/service.py:15.",
+        "engine": "text",
+        "total": 2
+      }
+    },
+    {
+      "item": 6,
+      "description": "impact_analysis reports affected files, tests and a risk level",
+      "pass": true,
+      "detail": {
+        "riskLevel": "LOW",
+        "confidence": "high",
+        "method": "heuristic",
+        "notes": [
+          "method heuristic: declarations, references and imports come from lexical extractors, so a receiver-typed call analysis is out of scope",
+          "the target is qualified: references are matched by member name, so same-named members of unrelated types appear as hits",
+          "depth 2: direct files plus 2 import hop(s); raise depth to widen the blast radius, lower it to focus"
+        ]
+      }
+    },
+    {
+      "item": 6.1,
+      "description": "create_checkpoint records a reversible checkpoint before any edit",
+      "pass": true,
+      "detail": {
+        "checkpointId": "ck-20261004-155035-2s72",
+        "note": "snapshotted 2 of 2 changed file(s) at commit a49c40c; rollback writes this content back and never deletes files created afterwards"
+      }
+    }
+  ]
+}

@@ -85,3 +85,27 @@ node tools\asar-inspect.mjs read 'D:\dsh\dsh-desktop\resources\app.asar' 'dsh/no
 The reader locates the directory header instead of assuming a fixed offset — during Phase 10 the
 first version assumed one and silently returned content from the *wrong file*, which is exactly the
 class of bug that makes a provenance tool worse than no tool.
+
+## Acceptance run (2026-10-04)
+
+`tools/v1-acceptance.mjs` drives the real server over stdio in four stages against
+`D:\Projects\devpilot-demo` (src-layout Python project, pytest suite, one deliberate bug, one
+uncommitted user edit):
+
+| Stage | Items | Result |
+| --- | --- | --- |
+| `recon` | 1–6 | 8/8 — 19 tools, workspace opened, scan answers "how do I run this", symbols/references/impact found, checkpoint created |
+| `verify` | 7–8 | 2/2 — failing suite as structured counts, then category + location + evidence |
+| `post` | 9–12 | 5/5 — suite passes, `run_project` really starts the project, diff reviewed with risk and patch artifact, the user's own edit listed separately |
+| `rollback` | 13 | 7/7 — the fix was undone for real (suite fails again), the user's note survived, the index was never modified |
+
+Raw envelopes: `docs/evidence/recon.json`, `verify.json`, `post.json`, `rollback.json`.
+
+Item 1 of the table above ("connected to DSH") is verified at the level DSH itself uses — the exact
+`command` / `args` / `cwd` from the profile entry, handshake, `tools/list`, clean exit on EOF — plus
+the profile entry parsing as YAML with all 11 entries intact. The tools become visible in a live
+model session only after DSH restarts, because the profile is read at harness start.
+
+Where the entry lives on this machine: `C:\Users\王贝波\.dsh\profiles\desktop\cordis.patch.yml`
+(backed up next to it as `cordis.patch.yml.bak-devpilot-*` before the edit). The block is inserted
+before the `managed - do not edit` webserver section so that section stays byte-identical.

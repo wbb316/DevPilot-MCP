@@ -1,0 +1,72 @@
+{
+  "stage": "post",
+  "target": "D:/Projects/devpilot-demo",
+  "generatedAt": "2026-10-04T15:50:53.054Z",
+  "serverCommand": "node dist/index.js serve",
+  "passed": 5,
+  "failed": 0,
+  "checks": [
+    {
+      "item": 9,
+      "description": "after the fix, run_tests reports a fully passing suite",
+      "pass": true,
+      "detail": {
+        "status": "passed",
+        "total": 5,
+        "passed": 5,
+        "failed": 0
+      }
+    },
+    {
+      "item": 4.1,
+      "description": "run_project really starts it (module form + PYTHONPATH from the profile)",
+      "pass": true,
+      "detail": {
+        "status": "success",
+        "exitCode": 0,
+        "output": [
+          "products: 4",
+          "input average cents: 6490.00",
+          "total cents: 32970"
+        ]
+      }
+    },
+    {
+      "item": 10,
+      "description": "review_diff reports which files changed, with line counts",
+      "pass": true,
+      "detail": {
+        "totals": {
+          "files": 2,
+          "addedLines": 8,
+          "deletedLines": 5
+        },
+        "files": [
+          "README.md LOW",
+          "src/catalog/service.py LOW"
+        ]
+      }
+    },
+    {
+      "item": 11,
+      "description": "the diff is classified and auditable (risk, reasons, patch artifact)",
+      "pass": true,
+      "detail": {
+        "riskLevel": "LOW",
+        "highRisk": [],
+        "patch": ".devpilot/logs/diff-20261004-155053.patch"
+      }
+    },
+    {
+      "item": 12,
+      "description": "the user's pre-existing uncommitted change is identified, not mixed in",
+      "pass": true,
+      "detail": {
+        "preExistingChanges": [
+          "README.md"
+        ],
+        "unrelatedFiles": []
+      }
+    }
+  ]
+}

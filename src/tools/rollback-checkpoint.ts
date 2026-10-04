@@ -25,7 +25,7 @@ export const rollbackCheckpointTool = defineTool({
   name: 'rollback_checkpoint',
   title: 'Rollback to checkpoint',
   description:
-    'Restore the working tree to a checkpoint taken earlier. Files changed after the checkpoint are reported in protectedUserChanges and left untouched; untracked files are never deleted; the git index is not modified. Use dryRun first to see the effect.',
+    'Restore the working tree to a checkpoint taken earlier. Files edited after the checkpoint are restored to the content the checkpoint recorded (a file that was clean then is restored from its recorded commit); files that already match, and untracked files created afterwards, are left untouched and reported; the git index is never modified. Use dryRun first to see the effect.',
   permission: 'SAFE_WRITE',
   requiresWorkspace: true,
   inputSchema,
@@ -48,12 +48,14 @@ export const rollbackCheckpointTool = defineTool({
       restored: outcome.restored,
       skipped: outcome.skipped,
       protectedUserChanges: outcome.protectedUserChanges,
+      unchanged: outcome.unchanged,
       dryRun: outcome.dryRun,
       notes: outcome.notes,
     };
 
     const verb = outcome.dryRun ? 'would restore' : 'restored';
     const summary = `${verb} ${outcome.restored.length} file(s) from ${outcome.checkpoint.id}` +
+      `${outcome.unchanged.length === 0 ? '' : `; ${outcome.unchanged.length} already matched and were left alone`}` +
       `${outcome.protectedUserChanges.length === 0 ? '' : `; ${outcome.protectedUserChanges.length} file(s) protected (edited after the checkpoint)`}` +
       `${outcome.skipped.length === 0 ? '' : `; ${outcome.skipped.length} file(s) skipped`}`;
 

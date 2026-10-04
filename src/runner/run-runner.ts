@@ -51,6 +51,8 @@ interface ResolvedRunCommand {
   args: string[];
   source: 'explicit' | 'project' | 'inferred' | 'config';
   notes: string[];
+  /** Environment the command needs (Phase 10: `PYTHONPATH=src` for a src-layout package). */
+  env?: Record<string, string>;
 }
 
 function inferRunCommand(profile: ProjectProfile): ResolvedRunCommand | undefined {
@@ -110,11 +112,21 @@ export function resolveRunCommand(
   const candidates = input.profile.candidates.run;
   if (candidates !== undefined && candidates.trim() !== '') {
     const split = splitCommandLine(candidates);
+    const env = input.profile.candidates.runEnv;
+    const notes = ['command taken from the project profile / config'];
+    if (env !== undefined && Object.keys(env).length > 0) {
+      notes.push(
+        `the project needs ${Object.entries(env)
+          .map(([key, value]) => `${key}=${value}`)
+          .join(', ')} to start this way`,
+      );
+    }
     return {
       command: split.command,
       args: [...split.args, ...extraArgs],
       source: input.config.project.run_command === null ? 'project' : 'config',
-      notes: ['command taken from the project profile / config'],
+      notes,
+      ...(env === undefined ? {} : { env }),
     };
   }
 
@@ -167,7 +179,7 @@ export async function runProject(input: RunRunnerInput): Promise<RunRunnerOutput
     maxStderrBytes: maxBytes,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
     // Unbuffered python: a killed service must still have produced its output.
-    env: { PYTHONUNBUFFERED: '1', ...(input.env ?? {}) },
+    env: { PYTHONUNBUFFERED: '1', ...(resolved.env ?? {}), ...(input.env ?? {}) },
     logFile,
   });
 

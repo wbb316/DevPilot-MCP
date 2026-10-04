@@ -1,0 +1,102 @@
+{
+  "stage": "rollback",
+  "target": "D:/Projects/devpilot-demo",
+  "generatedAt": "2026-10-04T15:50:55.799Z",
+  "serverCommand": "node dist/index.js serve",
+  "passed": 7,
+  "failed": 0,
+  "checks": [
+    {
+      "item": 13.1,
+      "description": "get_git_status shows the dirty tree (fix + the user's own change)",
+      "pass": true,
+      "detail": {
+        "branch": "main",
+        "changedFiles": [
+          "README.md",
+          "src/catalog/service.py"
+        ],
+        "preExisting": true,
+        "checkpoints": 4
+      }
+    },
+    {
+      "item": 13.2,
+      "description": "rollback_checkpoint --dry-run names exactly what it would restore",
+      "pass": true,
+      "detail": {
+        "restored": [
+          "src/catalog/service.py"
+        ],
+        "skipped": [],
+        "protected": []
+      }
+    },
+    {
+      "item": 13.3,
+      "description": "rollback restores DevPilot's own edits",
+      "pass": true,
+      "detail": {
+        "restored": [
+          "src/catalog/service.py"
+        ],
+        "skipped": [],
+        "protected": [],
+        "notes": [
+          "the git index was left untouched: restored files are unstaged working-tree content",
+          "1 file(s) already matched the checkpoint or the recorded commit and were left alone: README.md"
+        ]
+      }
+    },
+    {
+      "item": 13.7,
+      "description": "the user's own pre-existing edit is reported as left alone, never as a restore",
+      "pass": true,
+      "detail": {
+        "restored": [
+          "src/catalog/service.py"
+        ],
+        "unchanged": [
+          "README.md"
+        ],
+        "skipped": [],
+        "notes": [
+          "the git index was left untouched: restored files are unstaged working-tree content",
+          "1 file(s) already matched the checkpoint or the recorded commit and were left alone: README.md"
+        ]
+      }
+    },
+    {
+      "item": 13.4,
+      "description": "the restore was real: the suite fails again after rollback",
+      "pass": true,
+      "detail": {
+        "status": "failed",
+        "total": 5,
+        "failed": 2,
+        "passed": 3
+      }
+    },
+    {
+      "item": 13.5,
+      "description": "the user's uncommitted README note survived every operation",
+      "pass": true,
+      "detail": {
+        "readmeBytes": 430,
+        "tail": [
+          "",
+          "<!-- local note: my own uncommitted work, DevPilot must not destroy this -->"
+        ]
+      }
+    },
+    {
+      "item": 13.6,
+      "description": "the git index was never touched by DevPilot (still only README modified)",
+      "pass": true,
+      "detail": [
+        "README.md",
+        "src/catalog/service.py"
+      ]
+    }
+  ]
+}

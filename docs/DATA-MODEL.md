@@ -289,8 +289,15 @@ stat(path) → (mtimeMs, size)
   unchanged mtime+size  → reuse cached parse
   changed / new         → re-parse file, replace its symbols/refs/imports rows
   deleted (not in walk) → delete file row (CASCADE removes children)
-full scan only when: index missing, schemaVersion bumped, or explicit `scan_project { force: true }`
+full scan only when: index missing, schemaVersion *or extractorVersion* differs, or explicit
+`scan_project { force: true }`
 ```
+
+Because the cache key describes the *inputs*, a better rule set is invisible to it: `mtime+size`
+cannot notice that the extractors now understand f-string interpolations. `IndexMeta.extractorVersion`
+(`EXTRACTOR_VERSION` in `src/code/extract.ts`) exists for that, and the project-profile cache has the
+same mechanism as `SCANNER_VERSION` in `src/workspace/project-scanner.ts`. Bump them when a rule
+changes what the derived data means, not when a file changes.
 
 ## 9. Storage locations
 
@@ -305,3 +312,21 @@ full scan only when: index missing, schemaVersion bumped, or explicit `scan_proj
 
 `.devpilot/` is offered to `.gitignore` at `init` time; DevPilot never edits
 `.gitignore` without being asked.
+
+## 10. Notes fixed with Phase 10 (real-project acceptance)
+
+```ts
+interface IndexMeta { …; extractorVersion: number }          // §4: cache identity of the rule set
+interface ProjectProfile { …; candidates: { build?, test?, run?, runEnv?: Record<string,string> } }
+interface RollbackCheckpointData { …; unchanged?: string[] }  // paths that already matched: no write
+```
+
+- `candidates.runEnv` is what makes an inferred run command *correct* rather than plausible: a
+  src-layout Python entry point is only importable as `python -m pkg.mod` with `PYTHONPATH=<src>`, and
+  `run_project` merges that environment into the spawn.
+- A checkpoint's baseline is not only its snapshot. Files that were **clean** when it was taken have
+  no snapshot, so rollback restores them from the commit the checkpoint recorded (`head`); the
+  snapshot still protects everything that was already dirty, i.e. the user's own work.
+- `unchanged[]` is part of the honest reporting rule: a path whose content already matches is not a
+  restore, and the summary must not claim a write that did not happen.
+- `restored[]` therefore means "content was rewritten on disk", nothing weaker.

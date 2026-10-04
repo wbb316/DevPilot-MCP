@@ -369,4 +369,62 @@ Behaviour pinned at this gate:
 - A change set over `max_files_changed` / `max_lines_changed` is reported with per-limit violations
   and staging advice; `0` means "no budget configured" and is never a violation.
 
+## Phase 10 — Real-project acceptance
+
+Command: `node tools\v1-acceptance.mjs --stage=<recon|verify|post|rollback> --out=docs/evidence/<stage>.json`
+against `D:\Projects\devpilot-demo` (src-layout Python project, pytest suite, one deliberate bug,
+one uncommitted user edit). Four stages because a real bug fix needs an agent edit in between.
+
+```
+recon     8/8   19 tools · open_workspace · scan · run command · symbols · references · impact · checkpoint
+verify    2/2   failing suite as counts · diagnose_failure category + location + evidence
+post      5/5   suite passes · run_project really starts it · diff review · user edit kept separate
+rollback  7/7   fix truly undone · user's note untouched · index never modified
+```
+
+Gate record: 22 checks, 0 failures; run after the last source change, with `tsc` exit 0 and
+43 test files / 346 tests green.
+
+### The three defects a real project found and 346 tests did not
+
+1. **f-string interpolations were masked as string bodies.** `maskNonCode` blanked the whole
+   literal, so `print(f"{service.average_price('input'):.2f}")` produced no reference at all —
+   `find_references` reported 1 use in 1 file where grep shows 2 files. Fixed by extracting the
+   `{...}` fields (and JS/TS `${...}` substitutions) and restoring them after blanking, keeping
+   nested string literals masked. Lesson: a heuristic that survives fixtures can still be blind to
+   the most idiomatic line in the language.
+2. **The entry-point candidate list never looked inside a package.** A project whose entry point is
+   `src/catalog/cli.py` reported no run command. Measuring first mattered: `python src/catalog/cli.py`
+   dies with `ImportError: attempted relative import with no known parent package`, so the honest
+   answer is the module form plus the environment it needs — `python -m catalog.cli` with
+   `PYTHONPATH=src`. Hence `entrypoints` discovery by name anywhere in the tree (test paths
+   excluded) and the additive `candidates.runEnv`, applied by `run_project`.
+3. **A checkpoint could not undo an edit to a file that was clean when it was taken.** The
+   checkpoint snapshots only the files dirty at creation, so the agent's own edit to `service.py`
+   survived its own rollback (item 13.4 caught it: the suite stayed green). Rollback now restores
+   such files from the commit the checkpoint recorded, reports paths that already matched in
+   `unchanged` instead of claiming a write, refuses binaries, and preserves line-ending style.
+
+### Two caches that could not see a better rule set
+
+Both are the same bug in different places, and both were found only because the acceptance run
+re-ran against an **already-indexed** workspace:
+
+- the symbol index was keyed by `mtime+size`, so the f-string fix produced no new results until
+  `INDEX_SCHEMA_VERSION` was joined by `EXTRACTOR_VERSION` (bumped → full re-parse);
+- the project profile cache was keyed on the tree, so the new detector kept serving the old
+  answer until `SCANNER_VERSION` was bumped 2 → 3.
+
+Rule: when a *rule set* changes what derived data means, bump its version — a cache key over
+inputs cannot notice a smarter implementation.
+
+### Driver mistakes worth remembering (they looked like product bugs at first)
+
+The acceptance driver is a client, and three of its failures were its own: it ran each stage in a
+fresh process without `open_workspace` (so `WORKSPACE_NOT_OPEN`), it read only `data` although a
+failed run/test puts the structured result in `error.details`, and its own assertion expected a
+nested string literal inside an f-string to stay visible. Each was decided by checking the
+documented contract before touching product code — and in the rollback case the same discipline
+went the other way and changed the contract.
+
 

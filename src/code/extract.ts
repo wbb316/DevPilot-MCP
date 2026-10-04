@@ -10,6 +10,14 @@ import { pythonParser } from './lang/python.js';
  * skipped by the index and reported as such — never silently "indexed" as zero symbols.
  */
 
+/**
+ * Extraction-rule version. Bump whenever a parser or the shared masking changes *what* is
+ * extracted: the index cache is otherwise keyed by mtime+size only and would keep serving
+ * results produced by an older rule set (Phase 10: the f-string fix needed this to take effect
+ * on an already-indexed workspace).
+ */
+export const EXTRACTOR_VERSION = 2;
+
 const PARSERS: Record<string, LanguageParser> = {
   python: pythonParser,
   java: javaParser,

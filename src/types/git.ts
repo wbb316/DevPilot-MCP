@@ -78,6 +78,8 @@ export interface RollbackCheckpointData {
   restored: string[];
   skipped: string[];
   protectedUserChanges: string[];
+  /** Paths that already matched the checkpoint / recorded commit, so nothing was written (Phase 10). */
+  unchanged?: string[];
   dryRun: boolean;
   /** Why a file was skipped or protected, plus what DevPilot deliberately did not touch. */
   notes?: string[];

@@ -70,6 +70,178 @@ export function positionAt(starts: readonly number[], offset: number): Position 
   return { line: low + 1, column: offset - (starts[low] ?? 0) + 1 };
 }
 
+/**
+ * True when the quote at `index` opens a Python f-string, i.e. the prefix letters directly
+ * before it contain `f` and are not the tail of an identifier (`myf"x"` is not a f-string).
+ */
+function isFStringPrefix(text: string, index: number): boolean {
+  let k = index - 1;
+  let letters = 0;
+  while (k >= 0 && letters < 3 && /[rRbBuUfF]/.test(text[k] as string)) {
+    k -= 1;
+    letters += 1;
+  }
+  if (letters === 0) return false;
+  const prefix = text.slice(k + 1, index).toLowerCase();
+  if (!prefix.includes('f')) return false;
+  const before = k >= 0 ? (text[k] as string) : '';
+  return before === '' || !/[\w.\])\]]/.test(before);
+}
+
+/** Index just past a string literal that starts at `start` (quote or triple quote). */
+function skipStringLiteral(text: string, start: number): number {
+  const quote = text[start] as string;
+  const triple = text.startsWith(quote.repeat(3), start);
+  const q = triple ? quote.repeat(3) : quote;
+  const n = text.length;
+  let j = start + q.length;
+  while (j < n) {
+    const c = text[j] as string;
+    if (c === '\\') {
+      j += 2;
+      continue;
+    }
+    if (text.startsWith(q, j)) return j + q.length;
+    if (c === '\n' && !triple) return j;
+    j += 1;
+  }
+  return n;
+}
+
+/**
+ * Walk one `{...}` / `${...}` field and record the spans that are *code*. Nested string
+ * literals are skipped, because their bodies are still not code.
+ */
+function scanField(
+  text: string,
+  start: number,
+  open: string,
+  close: string,
+  spans: Array<[number, number]>,
+): number {
+  const n = text.length;
+  let depth = 1;
+  let j = start;
+  let segmentStart = start;
+  while (j < n) {
+    const c = text[j] as string;
+    if (c === '"' || c === "'" || c === '`') {
+      if (j > segmentStart) spans.push([segmentStart, j]);
+      j = skipStringLiteral(text, j);
+      segmentStart = j;
+      continue;
+    }
+    if (c === open) {
+      depth += 1;
+      j += 1;
+      continue;
+    }
+    if (c === close) {
+      depth -= 1;
+      if (depth === 0) {
+        if (j > segmentStart) spans.push([segmentStart, j]);
+        return j + 1;
+      }
+      j += 1;
+      continue;
+    }
+    j += 1;
+  }
+  if (j > segmentStart) spans.push([segmentStart, j]);
+  return -1;
+}
+
+function pythonInterpolationSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const ch = text[i] as string;
+    if (ch !== '"' && ch !== "'") {
+      i += 1;
+      continue;
+    }
+    if (!isFStringPrefix(text, i)) {
+      i += 1;
+      continue;
+    }
+    const triple = text.startsWith(ch.repeat(3), i);
+    const quote = triple ? ch.repeat(3) : ch;
+    let j = i + quote.length;
+    while (j < n) {
+      if (text.startsWith(quote, j)) {
+        j += quote.length;
+        break;
+      }
+      const c = text[j] as string;
+      if (c === '\\') {
+        j += 2;
+        continue;
+      }
+      if (c === '{') {
+        if (text[j + 1] === '{') {
+          j += 2;
+          continue;
+        }
+        const end = scanField(text, j + 1, '{', '}', spans);
+        j = end === -1 ? n : end;
+        continue;
+      }
+      if (c === '}' && text[j + 1] === '}') {
+        j += 2;
+        continue;
+      }
+      j += 1;
+    }
+    i = j;
+  }
+  return spans;
+}
+
+function templateInterpolationSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    if (text[i] !== '`') {
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (j < n) {
+      const c = text[j] as string;
+      if (c === '\\') {
+        j += 2;
+        continue;
+      }
+      if (c === '`') {
+        j += 1;
+        break;
+      }
+      if (c === '$' && text[j + 1] === '{') {
+        const end = scanField(text, j + 2, '{', '}', spans);
+        j = end === -1 ? n : end;
+        continue;
+      }
+      j += 1;
+    }
+    i = j;
+  }
+  return spans;
+}
+
+/**
+ * Code that lives *inside* a string literal: Python f-string `{...}` fields and JS/TS
+ * template-literal `${...}` substitutions. Masking the whole literal hides real calls —
+ * the Phase 10 real-project run lost `f"{service.average_price('input'):.2f}"` entirely, so
+ * these spans are restored by `maskNonCode` after the blanking pass.
+ */
+function interpolationSpans(text: string, language: FileLanguage): Array<[number, number]> {
+  if (language === 'python') return pythonInterpolationSpans(text);
+  if (language === 'typescript' || language === 'javascript') return templateInterpolationSpans(text);
+  return [];
+}
+
 export function maskNonCode(text: string, language: FileLanguage): string {
   const rules = rulesFor(language);
   const out = text.split('');
@@ -134,6 +306,14 @@ export function maskNonCode(text: string, language: FileLanguage): string {
     }
 
     i += 1;
+  }
+
+  // Give the code inside interpolations back: it was masked with its literal, but it is code.
+  for (const [from, to] of interpolationSpans(text, language)) {
+    for (let k = from; k < to; k += 1) {
+      const ch = text[k];
+      if (ch !== '\n' && ch !== '\r') out[k] = ch as string;
+    }
   }
 
   return out.join('');

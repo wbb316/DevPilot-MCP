@@ -295,10 +295,26 @@ Gate: attack fixtures (path traversal, symlink escape, dangerous command, secret
 oversized diff) are each rejected with the right code; doctor on this machine reports
 consistent versions.
 
-## Phase 10 — Real-project validation
+## Phase 10 — Real-project validation — ✅ GATE PASSED (2026-10-04)
 
 * Wire DevPilot into DeepSeek Harness as an MCP server and run the V1 acceptance script
   below on real projects (e.g. `D:\Projects\minigpt-chinese`, a Spring Boot project).
+
+Gate evidence (`tools/v1-acceptance.mjs`, four stages, workspace `D:\Projects\devpilot-demo`):
+
+* `recon` 8/8 · `verify` 2/2 · `post` 5/5 · `rollback` 7/7 — 22 checks, 0 failures; raw envelopes
+  in `docs/evidence/{recon,verify,post,rollback}.json`, after `tsc` exit 0 and 43 files / 346 tests
+  green.
+* Wiring: profile `desktop` (`cordis.patch.yml`, backed up first) with
+  `@deepseek-ai/dsh-mcp-client`; the exact stdio command DSH spawns answers the handshake in
+  397 ms with 19 tools and exits cleanly on stdin EOF (`tools/mcp-probe.mjs`).
+* Three defects the real project found that the unit suite did not: f-string interpolations were
+  masked as string bodies (a call site vanished), the entry-point list never looked inside a
+  package (empty run command, and a src-layout project cannot be started as a path at all), and a
+  checkpoint could not undo an edit to a file that was clean when it was taken. Each has a
+  regression test; the last changed the rollback contract (`unchanged`, restore from the recorded
+  commit). Two caches also had to learn version identity: `EXTRACTOR_VERSION` (index) and
+  `SCANNER_VERSION` 2 → 3 (profile).
 
 Gate = V1 acceptance:
 
