@@ -1,19 +1,21 @@
 import type { AnyToolDefinition } from '../server/tool-registry.js';
+import { buildProjectTool } from './build-project.js';
 import { closeWorkspaceTool } from './close-workspace.js';
 import { findReferencesTool } from './find-references.js';
 import { findSymbolTool } from './find-symbol.js';
 import { getProjectMapTool } from './get-project-map.js';
 import { getWorkspaceStatusTool } from './get-workspace-status.js';
 import { openWorkspaceTool } from './open-workspace.js';
+import { runProjectTool } from './run-project.js';
 import { scanProjectTool } from './scan-project.js';
 
 /**
  * Every tool the server registers. New tools are added here and are picked up by
  * `server/mcp-server.ts` automatically (docs/ARCHITECTURE.md §7).
  *
- * Phase 1: workspace lifecycle. Phase 2: project scan and project map. Phases 3–9 add
- * find_symbol, find_references, impact_analysis, build_project, run_project, run_tests,
- * diagnose_failure, review_diff, doctor, checkpoints and benchmark.
+ * Phase 1: workspace lifecycle. Phase 2: project scan and project map. Phase 3: symbol and
+ * reference search. Phase 4: build and run. Phases 5–9 add run_tests, diagnose_failure,
+ * review_diff, checkpoints, impact_analysis, doctor and benchmark.
  */
 export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   openWorkspaceTool,
@@ -23,6 +25,8 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   getProjectMapTool,
   findSymbolTool,
   findReferencesTool,
+  buildProjectTool,
+  runProjectTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */

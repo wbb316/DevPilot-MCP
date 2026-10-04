@@ -128,11 +128,35 @@ export const errors = {
       hint: 'Use a supported build/test entrypoint or declare the command in .devpilot/config.yml.',
     });
   },
-  commandTimeout(command: string, seconds: number): DevPilotError {
+  commandTimeout(command: string, seconds: number, details?: unknown): DevPilotError {
     return new DevPilotError(
       'COMMAND_TIMEOUT',
       `Command exceeded ${seconds}s and was terminated: ${command}`,
-      { details: { command, timeoutSeconds: seconds }, retryable: true },
+      {
+        details: { command, timeoutSeconds: seconds, ...(details === undefined ? {} : { result: details }) },
+        retryable: true,
+        hint: 'Raise timeoutSeconds, or run a shorter command; a long-running service is expected to time out.',
+      },
+    );
+  },
+  commandFailed(command: string, exitCode: number | null, details?: unknown): DevPilotError {
+    return new DevPilotError(
+      'COMMAND_FAILED',
+      `${command} exited with code ${exitCode ?? 'null'}`,
+      {
+        details,
+        hint: 'details.stdoutTail/stderrTail hold the last lines; details.job.logFile has the full output.',
+      },
+    );
+  },
+  buildFailed(command: string, exitCode: number | null, details?: unknown): DevPilotError {
+    return new DevPilotError(
+      'BUILD_FAILED',
+      `${command} failed (exit code ${exitCode ?? 'null'})`,
+      {
+        details,
+        hint: 'details.errors lists the first failures with file:line; details.job.logFile has the full log.',
+      },
     );
   },
   unsupportedProject(message: string): DevPilotError {

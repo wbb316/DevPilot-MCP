@@ -40,3 +40,13 @@ export type {
   SearchResult,
 } from './code.js';
 export { SYMBOL_KINDS, REFERENCE_KINDS } from './code.js';
+
+export type {
+  JobKind,
+  JobRecord,
+  IssueSeverity,
+  IssueEntry,
+  ExecutionStatus,
+  BuildResult,
+  RunResult,
+} from './execution.js';

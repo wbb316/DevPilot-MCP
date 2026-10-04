@@ -27,6 +27,12 @@ export interface ProcessRunOptions {
   maxStderrBytes?: number;
   env?: Record<string, string | undefined>;
   shell?: boolean;
+  /**
+   * Hand the argument string to CreateProcess verbatim (no Node-side quoting). Required
+   * when wrapping a Windows batch shim: cmd.exe does not understand the `\"` escaping Node
+   * applies to arguments that contain quotes.
+   */
+  windowsVerbatimArguments?: boolean;
   logger?: Logger;
   /** Tee the captured output into this file (becomes `artifacts.log`). */
   logFile?: string;
@@ -135,6 +141,7 @@ export async function runProcess(options: ProcessRunOptions): Promise<ProcessRun
       shell: options.shell ?? false,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(options.windowsVerbatimArguments === true ? { windowsVerbatimArguments: true } : {}),
     });
   } catch (error) {
     return {
@@ -286,6 +293,11 @@ export function isWindowsScript(file: string): boolean {
   return process.platform === 'win32' && (extension === '.cmd' || extension === '.bat');
 }
 
+/** Quote one token for a cmd.exe command line (only when it needs it). */
+function quoteWindowsArg(value: string): string {
+  return /[\s&^|<>]/.test(value) ? `"${value}"` : value;
+}
+
 /**
  * Run an executable that may be a Windows batch shim. Arguments are already validated by
  * the command policy, and this function refuses anything that still looks like shell
@@ -325,10 +337,17 @@ export async function runExecutable(
       );
     }
   }
-  const comSpec = process.env['ComSpec'] ?? 'cmd.exe';
+
+  const comSpec = process.env['ComSpec'] ?? process.env['comspec'] ?? 'cmd.exe';
+  // The whole line is assembled here and passed verbatim: Node would otherwise escape the
+  // quotes around the shim path as \" — which cmd.exe does not understand — and every
+  // npm/mvn/gradlew invocation would fail with "is not recognized as an internal command".
+  // `cmd /s /c "…"` strips this outer pair again, leaving `"<shim>" <args>`.
+  const inner = [quoteWindowsArg(resolved), ...args.map(quoteWindowsArg)].join(' ');
   return runProcess({
     ...options,
     command: comSpec,
-    args: ['/d', '/s', '/c', `"${resolved}"`, ...args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg))],
+    args: ['/d', '/s', '/c', `"${inner}"`],
+    windowsVerbatimArguments: true,
   });
 }

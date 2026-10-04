@@ -69,10 +69,14 @@ describe('MCP server over stdio', () => {
     try {
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
+        'build_project',
         'close_workspace',
+        'find_references',
+        'find_symbol',
         'get_project_map',
         'get_workspace_status',
         'open_workspace',
+        'run_project',
         'scan_project',
       ]);
       const openTool = listed.tools.find((tool) => tool.name === 'open_workspace');

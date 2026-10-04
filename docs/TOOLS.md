@@ -144,6 +144,30 @@ Errors: `BUILD_FAILED`, `COMMAND_NOT_ALLOWED`, `COMMAND_TIMEOUT`, `UNSUPPORTED_P
 `data`: `RunResult` + `data.stdoutTail`/`data.stderrTail` (last N lines only)
 Errors: `COMMAND_NOT_ALLOWED`, `COMMAND_TIMEOUT`, `COMMAND_FAILED`.
 
+Notes fixed with Phase 4:
+
+- `path` here selects the **workspace** (id, absolute path, or a path inside it) — unlike the
+  Phase 3 tools, where `path` filters results.
+- A failed build/run is an error envelope whose `error.details` carries the whole structured
+  result (`status`, `errors[]`, `stdoutTail`/`stderrTail`, `job`). The agent never parses a
+  raw log to find out what broke; `job.logFile` is the full transcript.
+- Commands come from a rule table (`src/runner/build-system.ts`), never from an LLM, and are
+  validated by the command policy before `process-runner` spawns anything.
+  Target mapping — Maven: `compile` / `test-compile` / `-DskipTests package` (+`clean`);
+  Gradle: `compileJava` / `testClasses` / `build -x test` (+`clean`, wrapper when present);
+  npm/pnpm/yarn: `run build`, and `run typecheck` for `test-compile` when it exists;
+  Python: `-m compileall -q <sourceDirs>` and `-m build` for `package` (needs pyproject.toml).
+  `config.project.build_command` overrides every rule; a target the rules cannot map is
+  refused as `UNSUPPORTED_PROJECT` instead of guessed.
+- `run_project` resolution order: explicit `command` → the project's own run command
+  (config.yml / package.json / detector candidate) → inference from detected entrypoints
+  (Python entrypoint, Spring Boot dev server, `node <entry>`). A server that never exits ends
+  as `COMMAND_TIMEOUT` with its output preserved — the expected shape for a service.
+- Every invocation is appended to `.devpilot/logs/jobs.jsonl` (last 200 kept) with a raw
+  transcript at `.devpilot/logs/<jobId>.log`; Phase 6 reads that ledger for diagnosis.
+- Children run with `NO_COLOR=1`, `CI=1` and `PYTHONUNBUFFERED=1` so that a service killed by
+  the timeout still has emitted the output the agent needs to see.
+
 ---
 
 ## Phase 5

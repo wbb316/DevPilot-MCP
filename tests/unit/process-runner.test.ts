@@ -2,7 +2,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { formatCommandLine, resolveExecutable, runProcess, splitCommandLine } from '../../src/runner/process-runner';
+import {
+  formatCommandLine,
+  resolveExecutable,
+  runExecutable,
+  runProcess,
+  splitCommandLine,
+} from '../../src/runner/process-runner';
 import { makeTempDir, removeDir } from '../helpers/index';
 
 describe('process runner (the single gate to the OS)', () => {
@@ -76,6 +82,40 @@ describe('process runner (the single gate to the OS)', () => {
     const git = await resolveExecutable('git');
     expect(git).toBeDefined();
     expect(await resolveExecutable('definitely-not-a-real-binary-xyz')).toBeUndefined();
+  });
+
+  // Regression: npm/mvn/gradlew are .cmd shims on Windows. Node escapes the quotes around
+  // the shim path as \" when passing them to cmd.exe, which cmd does not understand, so
+  // every one of those commands failed with "is not recognized as an internal command".
+  it.skipIf(process.platform !== 'win32')(
+    'runs a Windows .cmd shim whose path and arguments contain spaces',
+    async () => {
+      const shim = path.join(dir, 'probe shim.cmd');
+      await fs.writeFile(
+        shim,
+        '@echo off\r\necho shim-arg:%1\r\necho shim-cwd:%CD%\r\nexit /b 0\r\n',
+        'utf8',
+      );
+      const result = await runExecutable({
+        command: shim,
+        args: ['hello world'],
+        cwd: dir,
+        timeoutMs: 30_000,
+      });
+      expect(result.spawnError).toBeUndefined();
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('hello world');
+      expect(result.stdout).toContain(`shim-cwd:${dir}`);
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform !== 'win32')('refuses shell syntax passed to a shim', async () => {
+    const shim = path.join(dir, 'probe-refuse.cmd');
+    await fs.writeFile(shim, '@echo off\r\nexit /b 0\r\n', 'utf8');
+    await expect(runExecutable({ command: shim, args: ['a & b'], cwd: dir })).rejects.toThrow(
+      /Windows command shim/,
+    );
   });
 });
 
