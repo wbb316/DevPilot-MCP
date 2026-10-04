@@ -134,3 +134,27 @@ that existed. See the Phase 3 notes in docs/TOOLS.md.
 Where the entry lives on this machine: `C:\Users\王贝波\.dsh\profiles\desktop\cordis.patch.yml`
 (backed up next to it as `cordis.patch.yml.bak-devpilot-*` before the edit). The block sits before
 the `managed - do not edit` webserver section so that section stays byte-identical.
+
+## Reloading the entry after a rebuild (2026-10-05)
+
+The stdio server is a **child process spawned at entry activation**, so `dist/index.js` is read once,
+at spawn. Rebuilding `dist` therefore does *not* reach a live session: after the `path`-filter fix
+landed and `dist` was rebuilt, the running session kept serving the old build — the exact call the
+fix repairs still answered `total: 0` / `confidence: low`, and the warning the fix adds was absent.
+
+DSH's `@deepseek-ai/dsh-hmr` watches the profile config, so the entry can be recycled without
+restarting the desktop app. Detaching the row and writing it back **verbatim** (two writes, zero
+semantic change, config ends byte-identical) forces a dispose + respawn:
+
+1. Replace the `- insert:` block with a comment. Confirm *both* effects before continuing:
+   `cordis_inspect_query host Config listConfigs {name:'@deepseek-ai/dsh-mcp-client'}` → `entries: []`,
+   and no `node ... \DevPilot-MCP\dist\index.js serve` process left in `Win32_Process`.
+2. Put the byte-identical block back. Confirm `total: 1` again and a **new** pid. On 2026-10-05:
+   `pid=1672` (old build) → `pid=28732` started 00:19:44, after which the previously failing call
+   returned `1 definition(s) … src/catalog/service.py:9 (class)` and the outside-workspace case
+   answered `WORKSPACE_NOT_FOUND`.
+
+Keep the two writes in separate steps: coalesced into one edit window, the loader sees the original
+tree and nothing reloads. A fresh child has no workspace open, so re-run `open_workspace` before the
+next call. Changing any real config value also reloads, but this procedure keeps the pinned config
+exactly as reviewed.
