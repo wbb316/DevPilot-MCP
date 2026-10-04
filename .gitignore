@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# test / coverage
+coverage/
+.vitest/
+
+# logs
+*.log
+npm-debug.log*
+
+# DevPilot workspace data (when this repo itself is opened as a workspace)
+.devpilot/
+
+# editor / OS
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
