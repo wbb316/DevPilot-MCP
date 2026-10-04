@@ -126,6 +126,30 @@ describe('CLI', () => {
     expect(payload.devpilotHome).toBe(home);
   }, 30_000);
 
+  it('runs the detected test suite from the CLI', async () => {
+    const text = capture(env, workspace);
+    expect(await runCli(['test', workspace], text.io)).toBe(0);
+    const output = text.out.join('');
+    expect(output).toMatch(/Framework\s+: pytest/);
+    expect(output).toMatch(/Status\s+: passed/);
+    expect(output).toMatch(/Tests\s+: \d+\/\d+ passed, 0 failed/);
+
+    const json = capture(env, workspace);
+    expect(await runCli(['test', workspace, '--json'], json.io)).toBe(0);
+    const payload = JSON.parse(json.out.join('')) as {
+      status: string;
+      framework: string;
+      total: number;
+      failed: number;
+      parsed: boolean;
+    };
+    expect(payload.status).toBe('passed');
+    expect(payload.framework).toBe('pytest');
+    expect(payload.parsed).toBe(true);
+    expect(payload.total).toBeGreaterThanOrEqual(3);
+    expect(payload.failed).toBe(0);
+  }, 120_000);
+
   it('fails cleanly, without a stack trace, for a missing path', async () => {
     const io = capture(env, workspace);
     expect(await runCli(['status', path.join(workspace, 'nope')], io.io)).toBe(2);

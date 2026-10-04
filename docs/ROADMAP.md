@@ -77,7 +77,7 @@ Phase 1 decisions (additions to the plan, all reflected in the docs)
 * `workspace/project-detector.ts` landed at marker level (Phase 2 reuses it and adds
   `.gitignore`-aware walking, statistics and `.devpilot/cache/project.json`).
 
-## Phase 2 — Project scanner + project map
+## Phase 2 — Project scanner + project map  ✅ GATE PASSED
 
 * `file-walker` (ignore-aware, `.gitignore` + config excludes, symlink-safe, depth/size caps).
 * Marker detection table: pom.xml, build.gradle, settings.gradle, package.json,
@@ -131,7 +131,7 @@ Phase 2 decisions (additions to the plan, all reflected in the docs)
   DevPilot's own writes (and `git status` touching `.git/index`) would invalidate every scan.
 * `layers` is Java/Kotlin-only; the TypeScript case is a regression test.
 
-## Phase 3 — Symbol & reference index
+## Phase 3 — Symbol & reference index  ✅ GATE PASSED (re-verified in the Phase 4 run)
 
 * `code/lang/*` adapters (Python/Java/TS-JS): classes, functions, methods, fields,
   signatures, line spans; import/require edges.
@@ -145,7 +145,7 @@ Gate: `find_symbol("CausalSelfAttention")` and `find_references("LoginService")`
 fixtures return exactly the expected locations; incremental re-index after editing one
 file parses only that file.
 
-## Phase 4 — Runner (build / run)
+## Phase 4 — Runner (build / run)  ✅ GATE PASSED
 
 * `process-runner`: single process gate, timeout, output caps, job ids, log files,
   env/cwd control, kill-tree on timeout.
@@ -161,7 +161,7 @@ Gate: build + run one Maven project and one Node project; timeout is enforced on
 deliberately hanging fixture; full logs land in `.devpilot/logs/` while the MCP reply
 stays structured and small.
 
-## Phase 5 — Test runner
+## Phase 5 — Test runner  ✅ GATE PASSED
 
 * Test adapters: pytest, unittest, Maven Surefire, Gradle test, Jest, Vitest.
 * Parsed results: total/passed/failed/skipped/errors + per-failure
@@ -171,6 +171,19 @@ stays structured and small.
 
 Gate: pytest/maven/node fixture failures are parsed into the exact JSON shape
 (`total/passed/failed/skipped` + failure list) with the raw log referenced as an artifact.
+
+Gate evidence (docs/GATES.md → "Phase 5"): `tsc -p tsconfig.json` 0 errors,
+`vitest run` 26 files / 209 tests pass, CLI smoke `devpilot test` → passed 3/3 (exit 0),
+seeded failure → `failed 3/4` with `tests/test_model.py:34` (exit 1), `--filter` → 1/1.
+
+Two traps the gate caught and the implementation now defends against:
+
+1. `-q` in the planned pytest arguments stacked with the project's own `addopts = "-q"` to
+   `-qq`, which suppresses the summary line — a parser that finds nothing would have reported
+   a silent `0 failures`. pytest is now planned without a quiet flag, and a unit test pins the
+   `-qq` shape as `parsed: false` (never a fabricated green).
+2. node:test TAP failures put the message on an indented line under the `error: |-` YAML key;
+   reading the key line made every failure read "error: |-".
 
 ## Phase 6 — Failure diagnosis
 

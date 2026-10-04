@@ -178,11 +178,17 @@ interface IssueEntry { path?: string; line?: number; column?: number;
 interface TestFailure { name: string; suite?: string; path?: string; line?: number;
                         message: string; stackHead?: string[]; durationMs?: number }
 
+interface TestDuration { name: string; durationMs: number }
+
 interface TestResult {
   status: 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests';
   framework: string; command: string; durationMs: number;
   total: number; passed: number; failed: number; skipped: number; errors: number;
   failures: TestFailure[]; job: JobRecord;
+  // Phase 5 additions: `parsed` is the honesty flag (false ⇒ the counts are not trustworthy
+  // and the envelope points at the log); `durations` is present only when the runner printed
+  // timings.
+  parsed: boolean; durations?: { slowest: TestDuration[] };
 }
 
 interface RunResult { status: 'success' | 'failed' | 'timeout'; command: string;
@@ -191,7 +197,6 @@ interface RunResult { status: 'success' | 'failed' | 'timeout'; command: string;
 ```
 
 ## 6. Diagnosis / review / git types
-
 ```ts
 interface DiagnosisResult {
   category: string;                      // CUDA_OUT_OF_MEMORY | NULL_POINTER | IMPORT_ERROR | ...

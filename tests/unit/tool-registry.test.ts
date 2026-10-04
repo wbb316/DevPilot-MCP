@@ -99,6 +99,8 @@ describe('tool registry', () => {
       'find_references',
       'build_project',
       'run_project',
+      'run_tests',
+      'run_test',
     ]);
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {},
@@ -112,6 +114,8 @@ describe('tool registry', () => {
       'get_workspace_status',
       'open_workspace',
       'run_project',
+      'run_test',
+      'run_tests',
       'scan_project',
     ]);
     await server.close();

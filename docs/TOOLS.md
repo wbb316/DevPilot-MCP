@@ -184,6 +184,29 @@ Errors: `TEST_FAILED` (with structured failures), `COMMAND_TIMEOUT`, `UNSUPPORTE
 ### `run_test` — EX
 Single target convenience wrapper: `{ target: string }` → one test case's result.
 
+Target forms accepted (docs the agent can rely on): `path/to/test_x.py::test_name`,
+`path/to/test_x.ts`, `UserServiceTest#method`, or a bare `test_name` (a name filter).
+
+Notes fixed with Phase 5:
+
+- `data.parsed` is the honesty flag: `true` only when a machine-readable summary was actually
+  parsed. When it is `false` the counts must not be trusted, and `data.notes` says so and
+  points at `artifacts.log`. Counts are never invented to fill the shape.
+- `data.parser` names the parser that produced the numbers. It can differ from
+  `data.framework` when a package.json test script hides a different runner; the fallback
+  chain is vitest → jest → node --test → pytest → unittest → JUnit.
+- `data.status` adds `no_tests` (exit code 0, nothing collected): returned as a successful
+  envelope with a warning, never as "passed".
+- pytest is planned **without** a quiet flag: a project whose own `addopts` already contains
+  `-q` would otherwise reach `-qq`, which suppresses the summary line. `-p no:cacheprovider`
+  keeps `.pytest_cache` out of the user's working tree.
+- Java failures report `suite` (test class) and, when a stack frame is available, `path`
+  (source file name) + `line`; the log artifact holds the full trace.
+- A failing run is an `TEST_FAILED` error envelope whose `error.details` carries the whole
+  structured result — the agent still reads structure, not the log.
+- `devpilot test [path] [--filter=…] [--file=…] [--fail-fast] [--json]` is the CLI twin:
+  exit 0 passed, 1 failed/no tests, 2 a DevPilot error.
+
 ---
 
 ## Phase 6

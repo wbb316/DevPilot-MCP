@@ -7,6 +7,8 @@ import { getProjectMapTool } from './get-project-map.js';
 import { getWorkspaceStatusTool } from './get-workspace-status.js';
 import { openWorkspaceTool } from './open-workspace.js';
 import { runProjectTool } from './run-project.js';
+import { runTestTool } from './run-test.js';
+import { runTestsTool } from './run-tests.js';
 import { scanProjectTool } from './scan-project.js';
 
 /**
@@ -14,8 +16,8 @@ import { scanProjectTool } from './scan-project.js';
  * `server/mcp-server.ts` automatically (docs/ARCHITECTURE.md §7).
  *
  * Phase 1: workspace lifecycle. Phase 2: project scan and project map. Phase 3: symbol and
- * reference search. Phase 4: build and run. Phases 5–9 add run_tests, diagnose_failure,
- * review_diff, checkpoints, impact_analysis, doctor and benchmark.
+ * reference search. Phase 4: build and run. Phase 5: test runner. Phases 6–9 add
+ * diagnose_failure, review_diff, checkpoints, impact_analysis, doctor and benchmark.
  */
 export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   openWorkspaceTool,
@@ -27,6 +29,8 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   findReferencesTool,
   buildProjectTool,
   runProjectTool,
+  runTestsTool,
+  runTestTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */

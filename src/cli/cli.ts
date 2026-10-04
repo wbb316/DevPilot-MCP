@@ -4,6 +4,7 @@ import { initCommand } from './commands/init.js';
 import { scanCommand } from './commands/scan.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
+import { testCommand } from './commands/test.js';
 
 /**
  * Human-facing CLI (docs/ARCHITECTURE.md §3). The MCP server is the product; this keeps
@@ -28,11 +29,16 @@ Commands:
       --json              machine-readable output
   status [path]      Show the detected project profile and git snapshot
       --json              machine-readable output
+  test [path]        Run the detected test framework and print the parsed result
+      --filter=<expr>     framework-level filter (pytest -k, mvn -Dtest, gradle --tests)
+      --file=<path>       run a single test file
+      --fail-fast         stop at the first failure
+      --json              machine-readable output
   serve              Start the MCP server on stdio (used by MCP clients)
   version            Print the version
   help               Show this help
 
-Not yet implemented (roadmap phases): test (5), doctor (9)
+Not yet implemented (roadmap phases): doctor (9)
 `;
 
 interface ParsedArgv {
@@ -109,11 +115,19 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
         force: parsed.flags.has('force'),
         json,
       });
-    case 'doctor':
-    case 'test': {
-      const phase = command === 'test' ? 5 : 9;
+    case 'test':
+      return testCommand(io, {
+        target: parsed.positionals[0] ?? io.cwd,
+        ...(typeof parsed.flags.get('filter') === 'string'
+          ? { filter: parsed.flags.get('filter') as string }
+          : {}),
+        ...(typeof parsed.flags.get('file') === 'string' ? { file: parsed.flags.get('file') as string } : {}),
+        failFast: parsed.flags.has('fail-fast'),
+        json,
+      });
+    case 'doctor': {
       io.stderr(
-        `devpilot ${command} is not implemented yet (roadmap Phase ${phase}). Start the server with \`devpilot serve\` and call the MCP tools instead.\n`,
+        `devpilot ${command} is not implemented yet (roadmap Phase 9). Start the server with \`devpilot serve\` and call the MCP tools instead.\n`,
       );
       return 2;
     }

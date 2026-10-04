@@ -77,6 +77,8 @@ describe('MCP server over stdio', () => {
         'get_workspace_status',
         'open_workspace',
         'run_project',
+        'run_test',
+        'run_tests',
         'scan_project',
       ]);
       const openTool = listed.tools.find((tool) => tool.name === 'open_workspace');

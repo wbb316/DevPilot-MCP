@@ -21,3 +21,9 @@ npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# python bytecode / pytest cache (fixtures must stay clean)
+__pycache__/
+*.pyc
+.pytest_cache/
+

@@ -159,6 +159,16 @@ export const errors = {
       },
     );
   },
+  testFailed(command: string, exitCode: number | null, details?: unknown): DevPilotError {
+    return new DevPilotError(
+      'TEST_FAILED',
+      `${command} reported failing tests (exit code ${exitCode ?? 'null'})`,
+      {
+        details,
+        hint: 'details.failures lists each failing test with a location and message; details.job.logFile has the full output.',
+      },
+    );
+  },
   unsupportedProject(message: string): DevPilotError {
     return new DevPilotError('UNSUPPORTED_PROJECT', message, {
       hint: 'Declare build/test/run commands in .devpilot/config.yml.',

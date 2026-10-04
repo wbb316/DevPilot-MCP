@@ -56,3 +56,42 @@ export interface RunResult {
   crashed: boolean;
   job: JobRecord;
 }
+
+/**
+ * Phase 5 (docs/DATA-MODEL.md §5). A test run is judged by the parsed summary, never by the
+ * agent reading the log: `parsed` says whether a machine-readable summary was actually found,
+ * so a silent parse failure cannot be mistaken for "all tests passed".
+ */
+export type TestStatus = 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests';
+
+export interface TestFailure {
+  name: string;
+  suite?: string;
+  path?: string;
+  line?: number;
+  message: string;
+  stackHead?: string[];
+  durationMs?: number;
+}
+
+export interface TestDuration {
+  name: string;
+  durationMs: number;
+}
+
+export interface TestResult {
+  status: TestStatus;
+  framework: string;
+  command: string;
+  durationMs: number;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  errors: number;
+  failures: TestFailure[];
+  durations?: { slowest: TestDuration[] };
+  job: JobRecord;
+  /** True only when the output contained a summary this module could actually parse. */
+  parsed: boolean;
+}
