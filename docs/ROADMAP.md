@@ -218,7 +218,7 @@ Notes fixed with Phase 6:
 - `devpilot diagnose [path] [--job=] [--log=] [--max-evidence=] [--json]` is the CLI twin and
   shares one use case (`src/diagnose/diagnose-job.ts`) with the tool, so the two cannot drift.
 
-## Phase 7 — Git diff review & checkpoints
+## Phase 7 — Git diff review & checkpoints  ✅ GATE PASSED
 
 * `git-manager` hardening: detect pre-existing user modifications before anything runs;
   refuse destructive flows when the tree is dirty (`GIT_DIRTY`).
@@ -229,8 +229,20 @@ Notes fixed with Phase 6:
   list, rollback **only** DevPilot-tracked changes, protecting user edits.
 * Tools: `review_diff`, `get_git_status`, `create_checkpoint`, `rollback_checkpoint`.
 
-Gate: a dirty working tree survives create → agent edit → rollback unchanged; review_diff
-flags an intentionally sneaky unrelated-file edit.
+Gate evidence (docs/GATES.md → "Phase 7"): `tsc -p tsconfig.json` 0 errors; the full suite
+passes 32 files / 256 tests, including four real-repository cases (status/diff/checkpoint/
+rollback) and an end-to-end run through the tool registry. A dirty working tree survives
+create → agent edit (same lines) → rollback; a file that appeared after the checkpoint is never
+deleted; DevPilot's own `.devpilot/` state is excluded from both the review and the checkpoint.
+
+Two corrections the gate forced (both recorded in GATES.md):
+
+* The restore mechanism was **replaced**: a patch reverse-apply cannot undo an edit to the very
+  lines the checkpoint recorded, which is the normal workflow. Checkpoints now store the
+  **content** of each changed file, and rollback writes it back.
+* Rollback used to report a path as `restored` when `git apply` succeeded on a selection that
+  contained no hunk for it (a successful no-op). A path is now only restored when the snapshot —
+  or, as a fallback, an actual patch hunk — covers it.
 
 ## Phase 8 — Impact analysis
 

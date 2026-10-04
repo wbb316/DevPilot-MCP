@@ -1,0 +1,73 @@
+import { z } from 'zod';
+
+import type { DiffReview } from '../types/git.js';
+import { defineTool } from '../server/tool-registry.js';
+import { errors } from '../errors/devpilot-error.js';
+import { ok } from '../errors/envelope.js';
+import { GitManager } from '../git/git-manager.js';
+import { analyzeDiff } from '../git/diff-analyzer.js';
+import { requireWorkspaceContext } from './scan-project.js';
+import { workspacePathSchema } from './shared.js';
+
+/**
+ * `review_diff` — docs/TOOLS.md Phase 7. Structured diff review: what changed, how risky it is,
+ * which tests are affected, and which changes predate the agent. The full patch is an artifact,
+ * never inlined into the response.
+ */
+
+const inputSchema = {
+  path: workspacePathSchema,
+  staged: z.boolean().optional().describe('Review staged changes (index) instead of the working tree'),
+  base: z
+    .string()
+    .optional()
+    .describe('Commit/ref to diff against — defaults to HEAD, or the empty tree on an unborn branch'),
+  includePatch: z.boolean().optional().describe('Write the full patch to .devpilot/ and return its path'),
+  maxFiles: z.number().int().min(1).max(2000).optional().describe('Cap on files analysed (default 200)'),
+};
+
+export const reviewDiffTool = defineTool({
+  name: 'review_diff',
+  title: 'Review diff',
+  description:
+    'Review the current diff: per-file status, added/deleted lines, changed symbols, risk level with explicit reasons, affected tests, and which changes existed before DevPilot ran. Use it to audit edits before reporting. Set includePatch to keep the full patch as an artifact.',
+  permission: 'READ_ONLY',
+  requiresWorkspace: true,
+  inputSchema,
+  handler: async (args, context) => {
+    const workspace = context.workspace;
+    if (workspace === undefined) throw errors.workspaceNotOpen();
+    const { paths } = requireWorkspaceContext(context.ctx, workspace);
+    const entry = await context.ctx.workspaces.resolveEntry(workspace.id);
+
+    const git = new GitManager({ cwd: entry.state.root, timeoutMs: 30_000 });
+    if (!(await git.isAvailable())) throw errors.gitNotAvailable('git binary not found on PATH');
+
+    const result = await analyzeDiff({
+      root: entry.state.root,
+      paths,
+      git,
+      ...(args.staged === undefined ? {} : { staged: args.staged }),
+      ...(args.base === undefined ? {} : { base: args.base }),
+      includePatch: args.includePatch === true,
+      ...(args.maxFiles === undefined ? {} : { maxFiles: args.maxFiles }),
+      logger: context.ctx.logger,
+    });
+
+    const review: DiffReview = result.review;
+    const summary =
+      review.totals.files === 0
+        ? 'no changes against the base'
+        : `${review.totals.files} file(s) changed, +${review.totals.addedLines} -${review.totals.deletedLines}, risk ${review.riskLevel}` +
+          `${review.highRisk.length === 0 ? '' : `, ${review.highRisk.length} high-risk file(s)`}` +
+          `${review.affectedTests.length === 0 ? '' : `, ${review.affectedTests.length} test file(s) touched`}`;
+
+    const artifacts: Record<string, string> = {};
+    if (review.patchArtifact !== undefined) artifacts['patch'] = review.patchArtifact;
+
+    return ok(summary, review, {
+      artifacts,
+      warnings: review.notes ?? [],
+    });
+  },
+});

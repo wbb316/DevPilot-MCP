@@ -8,6 +8,7 @@ import type { IndexState, OpenWorkspaceData, OpenWorkspaceOptions, PermissionLev
 import { PERMISSION_LEVELS } from '../types/workspace.js';
 import { errors } from '../errors/devpilot-error.js';
 import { GitManager } from '../git/git-manager.js';
+import { readBaseline, writeBaseline } from '../git/baseline.js';
 import { loadWorkspaceConfig } from '../config/config-loader.js';
 import { capabilities, type SessionCapabilities } from '../security/permission.js';
 import { isInside, longestRootMatch, nodeErrorToDevPilot, normalizeForCompare } from '../security/path-policy.js';
@@ -180,6 +181,9 @@ export class WorkspaceManager {
     // 7. git snapshot — never fatal
     const git = await this.probeGit(realRoot, warnings);
 
+    // 7b. pre-existing change baseline (Phase 7): what was already dirty before any agent edit.
+    await this.captureBaseline(realRoot, paths, git, warnings);
+
     const logger = createLogger({
       name: `workspace:${path.basename(realRoot)}`,
       file: workspaceLogFile(paths),
@@ -344,6 +348,46 @@ export class WorkspaceManager {
     if (git.isRepo && git.dirty) {
       warnings.push(
         `working tree already has ${git.changedFiles ?? 0} changed and ${git.untrackedFiles ?? 0} untracked file(s); DevPilot will not touch them`,
+      );
+    }
+  }
+
+  /**
+   * Capture the working tree at open time so later phases can distinguish "the user was already
+   * editing this" from "DevPilot changed this" (docs/TOOLS.md Phase 7). Captured once per
+   * workspace: re-capturing on a reopen would reclassify the agent's own edits as the user's.
+   */
+  private async captureBaseline(
+    root: string,
+    paths: WorkspacePaths,
+    git: WorkspaceState['git'],
+    warnings: string[],
+  ): Promise<void> {
+    if (git.isRepo !== true) return;
+    if ((await readBaseline(paths)) !== undefined) return;
+    try {
+      const manager = new GitManager({ cwd: root, timeoutMs: 15_000 });
+      const statuses = await manager.pathStatuses();
+      const changed: string[] = [];
+      const untracked: string[] = [];
+      for (const [file, xy] of statuses) {
+        if (xy === '??') untracked.push(file);
+        else changed.push(file);
+      }
+      await writeBaseline(paths, {
+        capturedAt: new Date().toISOString(),
+        ...(git.head === undefined ? {} : { head: git.head }),
+        ...(git.branch === undefined ? {} : { branch: git.branch }),
+        changed: changed.sort(),
+        untracked: untracked.sort(),
+      });
+    } catch (error) {
+      // A baseline only sharpens `review_diff`; it must never stop a workspace from opening,
+      // but the agent is told that pre-existing changes cannot be separated this session.
+      warnings.push(
+        `could not capture the pre-existing change baseline: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }

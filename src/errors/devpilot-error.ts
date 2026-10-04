@@ -118,6 +118,12 @@ export const errors = {
       { hint: 'Install git, or work without git-backed features.' },
     );
   },
+  gitDirty(detail: string, hint?: string): DevPilotError {
+    return new DevPilotError('GIT_DIRTY', detail, {
+      ...(hint === undefined ? {} : { hint }),
+    });
+  },
+
   gitFailed(args: readonly string[], detail: string): DevPilotError {
     return new DevPilotError('GIT_FAILED', `git ${args.join(' ')} failed: ${detail}`, {
       details: { args: [...args], stderr: detail },

@@ -196,3 +196,54 @@ Behaviour pinned at this gate:
 - `devpilot diagnose` and the `diagnose_failure` tool share one use case
   (`src/diagnose/diagnose-job.ts`), so the human path and the agent path cannot drift.
 
+---
+
+## Phase 7 — Git diff review & checkpoints
+
+Gate command: `node node_modules/typescript/bin/tsc -p tsconfig.json` → 0 errors, then
+`node node_modules/vitest/vitest.mjs run` → **32 files / 256 tests passed** (Phase 6: 28/231).
+Real-repository coverage: `tests/unit/diff-analyzer.test.ts`, `tests/unit/checkpoint-rollback.test.ts`
+(7 cases) and `tests/integration/git-tools.test.ts` (tool registry end to end: status → checkpoint →
+edit → review → dry-run → rollback → unknown id → close).
+
+### The restore mechanism was wrong, and only an end-to-end test said so
+
+The first implementation restored files by reverse-applying the checkpoint patch per path
+(`git apply --reverse --include=<path>`). Every unit check of that design passed, and the
+integration test then failed at the *primary* use case:
+
+```text
+expected [ '.devpilot/' ] to include 'src/app.py'      ← checkpoint recorded DevPilot's own state dir
+expected [] to include 'src/app.py'                    ← nothing was restorable at all
+```
+
+1. **A patch reverse-apply cannot undo an edit to the same lines it recorded.** The workflow this
+   phase exists for is *checkpoint → edit the code → roll back*; the reverse apply refuses exactly
+   then, because the post-image no longer matches. The unit test had "proved" the design by editing
+   an *unrelated* region of the file — a test that was convenient rather than representative.
+   Fixed by changing the mechanism: `create_checkpoint` now stores the **content** of every changed
+   file under `.devpilot/checkpoints/<id>/files/`, and `rollback_checkpoint` writes it back.
+   `patchFile` is kept as an audit artifact. This also makes an untracked-at-checkpoint file
+   restorable, which a patch could never do.
+2. **A successful no-op was reported as a restore.** `git apply --include=<path>` exits 0 when the
+   selection matches no hunk, so `.devpilot/` (present in `git status`, absent from every hunk) was
+   counted as `restored`. The patch's real paths are now parsed (`src/git/patch.ts`), and a path is
+   only `restored` when the snapshot covers it — otherwise it lands in `skipped` with a reason.
+3. **`.devpilot/` was recorded as user work.** `open_workspace` creates the directory, git sees an
+   untracked path, and the checkpoint dutifully recorded DevPilot's own metadata as a change the
+   user cares about. Both `create_checkpoint` and `review_diff` now exclude `.git`/`.devpilot` and
+   report how many paths were skipped.
+
+### Behaviour pinned at this gate
+
+- Rollback never touches the index (no `add`/`reset`/`checkout -f`/`clean`), never deletes files
+  created after the checkpoint, and refuses (with `GIT_DIRTY`) while a merge/rebase/cherry-pick is
+  in progress — the only state where a restore is genuinely ambiguous.
+- `preExisting` / `preExistingChanges` come from a baseline written **once**, at first open
+  (`.devpilot/cache/git-baseline.json`). Re-capturing on a reopen would relabel the agent's own
+  edits as the user's, so the capture is skipped when a baseline exists.
+- Risk levels always carry a stated reason (`[HIGH] secret-bearing file`), never a bare verdict;
+  symbol hits are named but do not raise the level by themselves.
+- Line endings: `git apply` writes CRLF on a Windows checkout with `core.autocrlf=true`. That is
+  git matching the surrounding tree, not a bug, so tests compare line content rather than bytes.
+

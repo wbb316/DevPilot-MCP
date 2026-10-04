@@ -65,3 +65,19 @@ export type {
   SuspectReason,
 } from './diagnosis.js';
 export { DIAGNOSIS_CATEGORIES } from './diagnosis.js';
+
+export type {
+  ChangedFile,
+  ChangedFileStatus,
+  Checkpoint,
+  CheckpointIndexFile,
+  CheckpointKind,
+  CreateCheckpointData,
+  DiffReview,
+  GitBaseline,
+  GitStatusData,
+  GitTotals,
+  RiskLevel,
+  RollbackCheckpointData,
+} from './git.js';
+export { EMPTY_TREE_SHA } from './git.js';

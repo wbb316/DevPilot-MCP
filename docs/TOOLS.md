@@ -267,9 +267,31 @@ operation would endanger user work; a dirty tree is recorded, never stashed away
 ```ts
 { checkpointId: string, path?: string, dryRun?: boolean }
 ```
-`data`: `{ restored: string[], skipped: string[], protectedUserChanges: string[], dryRun }`
-Guarantee: only files tracked by that checkpoint are touched; user edits made after the
-checkpoint are reported and left alone unless `force` (FULL) is explicitly requested.
+`data`: `{ restored: string[], skipped: string[], protectedUserChanges: string[], dryRun, notes[] }`
+Guarantee: only the files recorded by that checkpoint are touched, and the git index is never
+modified (no `add`, `reset`, `checkout -f`, `clean`).
+
+Notes fixed with Phase 7:
+
+- A checkpoint stores the **content** of every changed file under `.devpilot/checkpoints/<id>/`,
+  plus a patch of the created diff as an audit artifact. Rollback writes the content back, so it
+  works after the normal workflow (checkpoint → edit the same lines → roll back); a patch
+  reverse-apply cannot do that, and it cannot restore a file that was untracked at checkpoint time.
+- Because the snapshot is taken before this session changes anything, the user's pre-existing
+  uncommitted work is preserved by the restore rather than being refused.
+- Files that appear **after** the checkpoint are never deleted: a patch cannot know whether they
+  are the user's. They are listed in `notes` instead, and a path with no snapshot and no patch
+  hunk is reported in `skipped` — never counted as restored.
+- `protectedUserChanges` holds paths DevPilot refuses to write: `.git/` metadata, anything
+  absolute, anything escaping the workspace, and snapshot-less files that moved on since.
+- `.git` and `.devpilot` paths are excluded from checkpoints and from `review_diff`; a note states
+  how many were skipped, so a clean-looking review is never silently hiding files.
+- `preExistingChanges` comes from the baseline `open_workspace` writes once
+  (`.devpilot/cache/git-baseline.json`). It is captured on first open only, so a reopen cannot
+  reclassify the agent's own edits as the user's. Without a baseline the field is empty and
+  `review_diff` says so.
+- A restore writes the platform's line endings (`core.autocrlf`), matching the rest of the
+  checkout; that is git behaviour, not an artefact of DevPilot.
 
 ---
 

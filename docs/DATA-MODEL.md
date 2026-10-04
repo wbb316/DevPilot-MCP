@@ -226,9 +226,16 @@ interface DiffReview {
 
 type CheckpointKind = 'manual' | 'pre_write' | 'pre_command';
 interface Checkpoint { id: string; kind: CheckpointKind; createdAt: string; branch: string;
-                       head: string; label?: string; files: string[]; patchFile: string;
-                       baseRef: string; dirtyAtCreate: boolean }
+                       head: string; label?: string; files: string[];
+                       patchFile: string;        // audit artifact of the created diff
+                       snapshotDir: string;      // content of `files` — what a restore writes back
+                       baseRef: string; dirtyAtCreate: boolean;
+                       snapshotSkipped?: string[] }  // too large/unreadable: patch-only fallback
 ```
+
+A checkpoint's `snapshotDir` (`.devpilot/checkpoints/<id>/files/<path>`) is the restore source:
+recording bytes rather than a reverse-applicable diff is what makes `rollback_checkpoint` work
+after the same lines were edited again, and it is what lets an untracked file be recorded at all.
 
 ## 7. Environment types (Phase 9)
 
