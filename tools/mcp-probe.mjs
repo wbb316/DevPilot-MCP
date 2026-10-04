@@ -11,7 +11,11 @@
  *   node tools/mcp-probe.mjs                       # probe DevPilot itself, list tools
  *   node tools/mcp-probe.mjs --tool=scan_project --args={"path":"D:/Projects/devpilot-demo"}
  *   node tools/mcp-probe.mjs --tool=scan_project --args-file=args.json   (Windows-safe)
+ *   node tools/mcp-probe.mjs --steps-file=steps.json   # [{ "tool": ..., "args": {...} }, ...]
  *   node tools/mcp-probe.mjs --cmd=node --arg=dist/index.js --arg=serve
+ *
+ * `--steps-file` exists because one server process holds one workspace: proving anything that
+ * needs open_workspace *followed by* another call requires several calls in one session.
  */
 
 import fs from 'node:fs';
@@ -25,7 +29,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function parseArgs(argv) {
-  const options = { command: 'node', args: [], cwd: repoRoot, tool: undefined, toolArgs: undefined, json: false };
+  const options = { command: 'node', args: [], cwd: repoRoot, tool: undefined, toolArgs: undefined, steps: undefined, json: false };
   const positional = [];
   for (const raw of argv) {
     if (raw === '--') continue;
@@ -35,6 +39,7 @@ function parseArgs(argv) {
     else if (raw.startsWith('--tool=')) options.tool = raw.slice(7);
     else if (raw.startsWith('--args=')) options.toolArgs = JSON.parse(raw.slice(7));
     else if (raw.startsWith('--args-file=')) options.toolArgs = JSON.parse(fs.readFileSync(raw.slice(12), 'utf8'));
+    else if (raw.startsWith('--steps-file=')) options.steps = JSON.parse(fs.readFileSync(raw.slice(13), 'utf8'));
     else if (raw === '--json') options.json = true;
     else positional.push(raw);
   }
@@ -91,21 +96,26 @@ try {
     tools: names,
   };
 
-  if (options.tool !== undefined) {
+  const steps = options.steps ?? (options.tool === undefined ? [] : [{ tool: options.tool, args: options.toolArgs }]);
+  report.calls = [];
+  for (const step of steps) {
     const callStarted = Date.now();
-    const result = await client.callTool({ name: options.tool, arguments: options.toolArgs });
+    const result = await client.callTool({ name: step.tool, arguments: step.args ?? {} });
     const envelope = envelopeOf(result);
-    report.call = {
-      tool: options.tool,
+    const entry = {
+      tool: step.tool,
       isError: result.isError === true,
       durationMs: Date.now() - callStarted,
       success: envelope?.success,
       summary: envelope?.summary,
       error: envelope?.error,
+      warnings: Array.isArray(envelope?.warnings) ? envelope.warnings : [],
       dataKeys: envelope?.data && typeof envelope.data === 'object' ? Object.keys(envelope.data) : [],
     };
-    if (options.json) report.call.envelope = envelope;
+    if (options.json) entry.envelope = envelope;
+    report.calls.push(entry);
   }
+  if (report.calls.length === 1) report.call = report.calls[0];
 
   await client.close();
   report.closed = true;
@@ -116,9 +126,10 @@ try {
     console.log(`cwd          ${report.cwd}`);
     console.log(`handshake    ${report.handshakeMs} ms`);
     console.log(`tools        ${report.toolCount}`);
-    if (report.call) {
-      console.log(`call         ${report.call.tool} -> ${report.call.summary ?? report.call.error?.code ?? 'no summary'}`);
-      console.log(`call isError ${report.call.isError}`);
+    for (const call of report.calls ?? (report.call ? [report.call] : [])) {
+      console.log(`call         ${call.tool} -> ${call.summary ?? call.error?.code ?? 'no summary'}`);
+      console.log(`call isError ${call.isError}`);
+      for (const warning of call.warnings ?? []) console.log(`  warning    ${warning}`);
     }
     console.log(`exit         clean`);
   }
