@@ -185,7 +185,7 @@ Two traps the gate caught and the implementation now defends against:
 2. node:test TAP failures put the message on an indented line under the `error: |-` YAML key;
    reading the key line made every failure read "error: |-".
 
-## Phase 6 — Failure diagnosis
+## Phase 6 — Failure diagnosis  ✅ GATE PASSED
 
 * `diagnose_failure`: correlate last command (job id) + exit code + stderr + stack
   trace + recent file changes (git status/diff stat) + environment facts.
@@ -198,6 +198,25 @@ Two traps the gate caught and the implementation now defends against:
 
 Gate: on the failing fixtures each seeded failure is classified into the right category
 with the correct file:line and a suspect file list.
+
+Notes fixed with Phase 6:
+
+- The classifier is a **weighted rule table** (`src/diagnose/patterns.ts`), not a model call:
+  a strong rule beats a weak one, and `UNKNOWN` is an honest answer (`hint` still points at the
+  log). `confidence` is *stated*: strong + located = high, strong unlocated = medium, weak =
+  medium/low, `UNKNOWN` = low. A failing assertion is deliberately only `medium` — it reports a
+  symptom, not the cause.
+- Locations come from four frame families (Python tracebacks, JVM, JS/TS, generic `file:line`).
+  Frames in `site-packages` / `node_modules` / `.venv` and frames outside the workspace are
+  **counted and skipped**, never returned: the agent should not be sent into a dependency.
+- Evidence is bounded (default 8 lines, clipped to 400 chars) and `evidenceDropped` says how many
+  matched lines were withheld; the located source line is prepended. Suspect files are ordered by
+  specificity — `in_stack` → `recently_changed` (git status, deletions excluded) →
+  `import_related` (reuses the Phase 3 index when it is already in memory, otherwise a note says so).
+- `relatedJob.command` is the full command line (`python -m pytest -p no:cacheprovider`), because
+  the ledger stores executable and argv separately.
+- `devpilot diagnose [path] [--job=] [--log=] [--max-evidence=] [--json]` is the CLI twin and
+  shares one use case (`src/diagnose/diagnose-job.ts`) with the tool, so the two cannot drift.
 
 ## Phase 7 — Git diff review & checkpoints
 

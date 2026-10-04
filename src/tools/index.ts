@@ -1,6 +1,7 @@
 import type { AnyToolDefinition } from '../server/tool-registry.js';
 import { buildProjectTool } from './build-project.js';
 import { closeWorkspaceTool } from './close-workspace.js';
+import { diagnoseFailureTool } from './diagnose-failure.js';
 import { findReferencesTool } from './find-references.js';
 import { findSymbolTool } from './find-symbol.js';
 import { getProjectMapTool } from './get-project-map.js';
@@ -31,6 +32,7 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   runProjectTool,
   runTestsTool,
   runTestTool,
+  diagnoseFailureTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */

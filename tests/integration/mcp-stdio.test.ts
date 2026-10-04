@@ -71,6 +71,7 @@ describe('MCP server over stdio', () => {
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
         'build_project',
         'close_workspace',
+        'diagnose_failure',
         'find_references',
         'find_symbol',
         'get_project_map',

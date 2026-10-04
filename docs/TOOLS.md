@@ -220,6 +220,26 @@ Notes fixed with Phase 5:
 `data`: `DiagnosisResult` (category, confidence, location, evidence, suspectFiles, relatedJob, hint)
 Errors: `FILE_NOT_FOUND`, `WORKSPACE_NOT_OPEN`.
 
+Notes fixed with Phase 6:
+
+- `command` matches the most recent job whose command line *contains* the text; it does not run
+  anything. With no arguments at all the most recent failed job is diagnosed (the newest job if
+  nothing has failed), and an empty ledger is `FILE_NOT_FOUND` with a hint to run something first.
+- `category` is one of `CUDA_OUT_OF_MEMORY`, `SYSTEM_OUT_OF_MEMORY`, `NULL_POINTER`,
+  `IMPORT_ERROR`, `SYNTAX_ERROR`, `TYPE_ERROR`, `NAME_ERROR`, `KEY_ERROR`, `ASSERTION_FAILED`,
+  `TEST_FAILED`, `COMPILE_ERROR`, `DEPENDENCY_ERROR`, `PORT_IN_USE`, `PERMISSION_DENIED`,
+  `FILE_NOT_FOUND`, `ENCODING_ERROR`, `NETWORK_ERROR`, `TIMEOUT`, `CONFIG_ERROR`, `GIT_ERROR`,
+  `UNKNOWN`. A strong rule wins over a weak one; `UNKNOWN` means no rule matched.
+- `confidence` is stated, never implied: strong+located `high`, strong unlocated `medium`,
+  weak `medium`/`low`, `UNKNOWN` `low`.
+- `evidence` is capped (`maxEvidence`, default 8, lines clipped to 400 chars) and starts with the
+  source line at `location` when it could be read. `evidenceDropped` reports withheld matches;
+  `notes` reports an empty log, frames skipped as dependency code, and a truncated log tail
+  (only the last 2 MiB are analysed). The full transcript is `logFile`.
+- Only the last 2 MiB of a log are read: failure summaries live at the end of the output.
+- `relatedJob.command` is the complete command line, executable plus argv.
+- `devpilot diagnose` is the CLI twin of this tool and shares its implementation.
+
 ---
 
 ## Phase 7

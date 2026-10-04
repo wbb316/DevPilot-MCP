@@ -74,8 +74,10 @@ export const errors = {
       { hint: 'Pass the absolute path of an existing project directory.' },
     );
   },
-  fileNotFound(target: string, detail?: string): DevPilotError {
-    return new DevPilotError('FILE_NOT_FOUND', detail ? `${target}: ${detail}` : `Not found: ${target}`);
+  fileNotFound(target: string, detail?: string, hint?: string): DevPilotError {
+    return new DevPilotError('FILE_NOT_FOUND', detail ? `${target}: ${detail}` : `Not found: ${target}`, {
+      hint,
+    });
   },
   pathOutsideWorkspace(target: string, root: string): DevPilotError {
     return new DevPilotError(

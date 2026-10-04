@@ -1,0 +1,244 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
+import { errors } from '../errors/devpilot-error.js';
+import { isInside, toPosix } from '../security/path-policy.js';
+import { GitManager } from '../git/git-manager.js';
+import { JobStore } from '../runner/job-store.js';
+import { cachedSymbolIndex } from '../code/index-registry.js';
+import type { Logger } from '../log/logger.js';
+import type { WorkspacePaths } from '../types/workspace.js';
+import type { DiagnosisLocation, DiagnosisResult } from '../types/diagnosis.js';
+import type { JobRecord } from '../types/execution.js';
+import { DEFAULT_MAX_EVIDENCE, analyzeFailure, buildDiagnosis } from './diagnose.js';
+
+/**
+ * The diagnosis use case, shared by the `diagnose_failure` MCP tool and `devpilot diagnose`.
+ * The tool is a thin adapter: everything that decides *what* to read and *how* to classify
+ * lives here so both entry points can never drift apart (docs/ARCHITECTURE.md §7).
+ */
+
+/** Only the tail of a log is analysed; failure summaries live at the end of the output. */
+export const MAX_LOG_BYTES = 2 * 1024 * 1024;
+export const MAX_CHANGED_FILES = 20;
+
+export interface DiagnoseJobRequest {
+  root: string;
+  paths: WorkspacePaths;
+  /** Used to reuse an in-memory symbol index for `import_related` suspects, when one exists. */
+  workspaceId?: string;
+  logger?: Logger;
+  jobId?: string;
+  command?: string;
+  logFile?: string;
+  maxEvidence?: number;
+}
+
+export async function diagnoseJob(request: DiagnoseJobRequest): Promise<DiagnosisResult> {
+  const { root } = request;
+  const store = new JobStore(request.paths);
+  const recent = await store.recent({ limit: 200 });
+
+  const job = await selectJob(recent, request);
+  if (job === undefined && request.logFile === undefined) {
+    throw errors.fileNotFound(
+      request.jobId !== undefined
+        ? `no job with id ${request.jobId} in this workspace ledger`
+        : request.command === undefined
+          ? 'no failed job found in this workspace ledger'
+          : `no job whose command contains "${request.command}"`,
+      undefined,
+      'Run build_project / run_project / run_tests first so the transcript is recorded, or pass logFile with a workspace-relative path.',
+    );
+  }
+
+  const logTarget = resolveLogTarget(root, job, request.logFile);
+  const transcript = await readLogTail(logTarget);
+
+  const analysis = analyzeFailure(transcript.text, root, {
+    ...(request.maxEvidence === undefined ? {} : { maxEvidence: request.maxEvidence }),
+    maxLocations: 5,
+  });
+
+  const extraEvidence: string[] = [];
+  const primary = analysis.locations[0];
+  if (primary !== undefined) {
+    const line = await sourceLine(root, primary);
+    if (line !== undefined) extraEvidence.push(line);
+  }
+
+  const extraNotes: string[] = [];
+  if (transcript.truncated) {
+    extraNotes.push(
+      `only the last ${Math.round(transcript.bytes / 1024)} KiB of the log were analysed (${Math.round(transcript.totalBytes / 1024)} KiB on disk)`,
+    );
+  }
+
+  const changedFiles = await recentChanges(root, request.logger);
+  const index = request.workspaceId === undefined ? undefined : cachedSymbolIndex(request.workspaceId);
+  const importersOf =
+    index === undefined
+      ? undefined
+      : (relativePath: string): string[] =>
+          index
+            .importEdges()
+            .filter((edge) => edge.toPath === relativePath)
+            .map((edge) => edge.fromPath);
+
+  if (importersOf === undefined) {
+    extraNotes.push(
+      'no in-memory symbol index for this workspace: import_related suspects were skipped (call find_symbol or find_references first to build the index)',
+    );
+  }
+
+  return buildDiagnosis({
+    analysis,
+    text: transcript.text,
+    ...(job === undefined ? {} : { job }),
+    logFile: toPosix(path.relative(root, logTarget)),
+    changedFiles,
+    ...(importersOf === undefined ? {} : { importersOf }),
+    ...(extraEvidence.length === 0 ? {} : { extraEvidence }),
+    ...(extraNotes.length === 0 ? {} : { extraNotes }),
+  });
+}
+
+/** One-line, log-free description of a diagnosis — shared by the tool envelope and the CLI. */
+export function describeDiagnosis(result: DiagnosisResult): string {
+  const where =
+    result.location === undefined
+      ? 'no workspace location extracted'
+      : `${result.location.path}${result.location.line === undefined ? '' : `:${result.location.line}`}`;
+  return `${result.category} (${result.confidence}) — ${where}; ${result.evidence.length} evidence line(s), ${result.suspectFiles.length} suspect file(s)`;
+}
+
+interface SelectArgs {
+  jobId?: string | undefined;
+  command?: string | undefined;
+  logFile?: string | undefined;
+}
+
+async function selectJob(
+  recent: readonly JobRecord[],
+  args: SelectArgs,
+): Promise<JobRecord | undefined> {
+  if (args.jobId !== undefined) return recent.find((job) => job.jobId === args.jobId);
+  if (args.logFile !== undefined) {
+    // A log without a ledger entry is fine; still attach the job that produced it, if known.
+    return recent.find((job) => job.logFile.endsWith(path.basename(args.logFile ?? '')));
+  }
+  if (args.command !== undefined) {
+    const needle = args.command.toLowerCase();
+    return recent.find((job) => job.command.toLowerCase().includes(needle));
+  }
+  const failed = recent.find((job) => job.exitCode !== 0 || job.exitCode === null || job.timedOut);
+  if (failed !== undefined) return failed;
+  // Nothing failed: report on the newest job so the answer is honest rather than empty.
+  return recent[0];
+}
+
+function resolveLogTarget(root: string, job: JobRecord | undefined, logFile?: string): string {
+  if (logFile !== undefined) {
+    const target = path.resolve(root, logFile);
+    if (!isInside(root, target)) throw errors.pathOutsideWorkspace(toPosix(logFile), toPosix(root));
+    return target;
+  }
+  const stored = job?.logFile;
+  if (stored === undefined || stored === '') {
+    throw errors.fileNotFound(
+      'no log file is recorded for this job',
+      undefined,
+      'Pass logFile with a workspace-relative path.',
+    );
+  }
+  const target = path.isAbsolute(stored) ? stored : path.resolve(root, stored);
+  if (!isInside(root, target)) throw errors.pathOutsideWorkspace(toPosix(target), toPosix(root));
+  return target;
+}
+
+interface LogTail {
+  text: string;
+  truncated: boolean;
+  bytes: number;
+  totalBytes: number;
+}
+
+async function readLogTail(target: string): Promise<LogTail> {
+  let size: number;
+  try {
+    size = (await fs.stat(target)).size;
+  } catch {
+    throw errors.fileNotFound(
+      toPosix(target),
+      'the transcript is gone',
+      'Re-run the command to produce a fresh log.',
+    );
+  }
+
+  const length = Math.min(size, MAX_LOG_BYTES);
+  const start = Math.max(0, size - length);
+  const handle = await fs.open(target, 'r');
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    const text = buffer.subarray(0, bytesRead).toString('utf8');
+    // Dropping the first partial line keeps the evidence lines readable.
+    const cleaned = start > 0 ? text.slice(text.indexOf('\n') + 1 || 0) : text;
+    return { text: cleaned, truncated: start > 0, bytes: bytesRead, totalBytes: size };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function sourceLine(root: string, location: DiagnosisLocation): Promise<string | undefined> {
+  if (location.line === undefined) return undefined;
+  const target = path.resolve(root, location.path);
+  if (!isInside(root, target)) return undefined;
+  try {
+    const text = await fs.readFile(target, 'utf8');
+    const line = text.split(/\r?\n/)[location.line - 1];
+    if (line === undefined) return undefined;
+    const trimmed = line.trim();
+    if (trimmed === '') return undefined;
+    const clipped = trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
+    return `${location.path}:${location.line} | ${clipped}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Paths with uncommitted changes (tracked edits and new untracked files), capped. */
+export async function recentChanges(
+  root: string,
+  logger: Logger | undefined,
+): Promise<string[]> {
+  try {
+    const git = new GitManager({ cwd: root, ...(logger === undefined ? {} : { logger }) });
+    if (!(await git.isRepo())) return [];
+    const repoRoot = (await git.repositoryRoot()) ?? root;
+    const lines = await git.statusPorcelain();
+    const out: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.replace(/\s+$/, '');
+      if (trimmed.length < 4) continue;
+      const status = trimmed.slice(0, 2);
+      if (status.includes('D')) continue; // a deleted file is not a suspect to edit
+      let rest = trimmed.slice(3).trim();
+      if (rest.startsWith('"') && rest.endsWith('"')) rest = rest.slice(1, -1);
+      const arrow = rest.lastIndexOf(' -> ');
+      if (arrow !== -1) rest = rest.slice(arrow + 4);
+      if (rest === '') continue;
+      const absolute = path.resolve(repoRoot, rest);
+      if (!isInside(root, absolute)) continue;
+      const relative = toPosix(path.relative(root, absolute));
+      if (relative.startsWith('.devpilot/')) continue;
+      if (!out.includes(relative)) out.push(relative);
+      if (out.length >= MAX_CHANGED_FILES) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+export { DEFAULT_MAX_EVIDENCE };

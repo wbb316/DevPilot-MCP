@@ -101,6 +101,7 @@ describe('tool registry', () => {
       'run_project',
       'run_tests',
       'run_test',
+      'diagnose_failure',
     ]);
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {},
@@ -108,6 +109,7 @@ describe('tool registry', () => {
     expect(registered.sort()).toEqual([
       'build_project',
       'close_workspace',
+      'diagnose_failure',
       'find_references',
       'find_symbol',
       'get_project_map',

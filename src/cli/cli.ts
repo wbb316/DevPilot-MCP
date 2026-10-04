@@ -5,6 +5,7 @@ import { scanCommand } from './commands/scan.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
 import { testCommand } from './commands/test.js';
+import { diagnoseCommand } from './commands/diagnose.js';
 
 /**
  * Human-facing CLI (docs/ARCHITECTURE.md §3). The MCP server is the product; this keeps
@@ -33,6 +34,11 @@ Commands:
       --filter=<expr>     framework-level filter (pytest -k, mvn -Dtest, gradle --tests)
       --file=<path>       run a single test file
       --fail-fast         stop at the first failure
+      --json              machine-readable output
+  diagnose [path]    Classify the last failed job: category, location, evidence, suspects
+      --job=<id>          diagnose a specific job from .devpilot/logs/jobs.jsonl
+      --log=<path>        diagnose a workspace-relative log file instead
+      --max-evidence=<n>  how many key lines to print (default 8)
       --json              machine-readable output
   serve              Start the MCP server on stdio (used by MCP clients)
   version            Print the version
@@ -125,6 +131,24 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
         failFast: parsed.flags.has('fail-fast'),
         json,
       });
+    case 'diagnose': {
+      const maxEvidence = parsed.flags.get('max-evidence');
+      const parsedMax =
+        typeof maxEvidence === 'string' && Number.isFinite(Number.parseInt(maxEvidence, 10))
+          ? Number.parseInt(maxEvidence, 10)
+          : undefined;
+      return diagnoseCommand(io, {
+        target: parsed.positionals[0] ?? io.cwd,
+        ...(typeof parsed.flags.get('job') === 'string'
+          ? { jobId: parsed.flags.get('job') as string }
+          : {}),
+        ...(typeof parsed.flags.get('log') === 'string'
+          ? { logFile: parsed.flags.get('log') as string }
+          : {}),
+        ...(parsedMax === undefined ? {} : { maxEvidence: parsedMax }),
+        json,
+      });
+    }
     case 'doctor': {
       io.stderr(
         `devpilot ${command} is not implemented yet (roadmap Phase 9). Start the server with \`devpilot serve\` and call the MCP tools instead.\n`,

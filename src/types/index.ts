@@ -49,4 +49,19 @@ export type {
   ExecutionStatus,
   BuildResult,
   RunResult,
+  TestStatus,
+  TestFailure,
+  TestDuration,
+  TestResult,
 } from './execution.js';
+
+export type {
+  DiagnosisCategory,
+  DiagnosisConfidence,
+  DiagnosisLocation,
+  DiagnosisJobRef,
+  DiagnosisResult,
+  SuspectFile,
+  SuspectReason,
+} from './diagnosis.js';
+export { DIAGNOSIS_CATEGORIES } from './diagnosis.js';
