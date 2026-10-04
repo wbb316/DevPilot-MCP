@@ -231,3 +231,18 @@ describe('analyzeFailure / buildDiagnosis', () => {
     expect(result.notes?.join(' ')).toMatch(/no workspace-relative source location/i);
   });
 });
+
+describe('evidence noise', () => {
+  it('drops TAP diagnostic keys but keeps a key whose value carries information', () => {
+    const text = [
+      '  error: |-',
+      "  code: 'ERR_ASSERTION'",
+      "  location: 'C:\\proj\\demo\\test\\x.test.js:7:10'",
+      '  duration_ms: 5.238',
+      '  error: Expected 1 to be 2',
+      'Error: real evidence line',
+    ].join('\n');
+    const { evidence } = collectEvidence(text, 8);
+    expect(evidence).toEqual(['error: Expected 1 to be 2', 'Error: real evidence line']);
+  });
+});

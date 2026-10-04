@@ -62,7 +62,7 @@ export function formatCommandLine(command: string, args: readonly string[] = [])
 }
 
 /**
- * Deterministic split of a rule-inferred command line ("python train.py", "mvn -q test").
+ * Deterministic split of a rule-inferred command line ("python train.py", "mvn -B test").
  * Honours double quotes; no shell expansion ever happens.
  */
 export function splitCommandLine(line: string): { command: string; args: string[] } {

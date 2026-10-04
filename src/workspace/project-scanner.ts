@@ -29,7 +29,7 @@ import { detectProject } from './project-detector.js';
  * Bump when detection/walk semantics change: the cache key covers the *tree*, not this code,
  * so without a version a smarter detector would keep serving profiles built by the old rules.
  */
-export const SCANNER_VERSION = 3;
+export const SCANNER_VERSION = 4;
 
 export interface ScanStats {  files: number;
   dirs: number;

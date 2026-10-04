@@ -195,17 +195,22 @@ Notes fixed with Phase 5:
 - `data.parser` names the parser that produced the numbers. It can differ from
   `data.framework` when a package.json test script hides a different runner; the fallback
   chain is vitest → jest → node --test → pytest → unittest → JUnit.
-- `data.status` adds `no_tests` (exit code 0, nothing collected): returned as a successful
-  envelope with a warning, never as "passed".
+- `data.status` adds `no_tests` (exit code 0, nothing collected) and `unknown` (exit code 0 but
+  no machine-readable summary was found): both are returned as successful envelopes with a
+  warning, never as "passed".
 - pytest is planned **without** a quiet flag: a project whose own `addopts` already contains
   `-q` would otherwise reach `-qq`, which suppresses the summary line. `-p no:cacheprovider`
-  keeps `.pytest_cache` out of the user's working tree.
+  keeps `.pytest_cache` out of the user's working tree. Maven is planned with `-B` for the same
+  reason (Phase 10): `mvn -q test` hides Surefire's `Tests run:` line on success, so a green
+  suite was reported as `passed` with `total: 0`.
 - Java failures report `suite` (test class) and, when a stack frame is available, `path`
-  (source file name) + `line`; the log artifact holds the full trace.
+  (source file name) + `line`. The frame is chosen by quality — the failing test's own class
+  first, then project code, then framework internals — because Surefire's *first* frame is
+  JUnit's own `AssertionFailureBuilder.java` (Phase 10). The log artifact holds the full trace.
 - A failing run is an `TEST_FAILED` error envelope whose `error.details` carries the whole
   structured result — the agent still reads structure, not the log.
 - `devpilot test [path] [--filter=…] [--file=…] [--fail-fast] [--json]` is the CLI twin:
-  exit 0 passed, 1 failed/no tests, 2 a DevPilot error.
+  exit 0 passed, 1 failed / no tests / unverified, 2 a DevPilot error.
 
 ---
 
@@ -239,6 +244,15 @@ Notes fixed with Phase 6:
 - Only the last 2 MiB of a log are read: failure summaries live at the end of the output.
 - `relatedJob.command` is the complete command line, executable plus argv.
 - `devpilot diagnose` is the CLI twin of this tool and shares its implementation.
+- `location` is ordered by what can be verified: frames that resolve to a file this workspace
+  actually contains come first, then frames naming a file it does not contain (dependencies, the
+  JDK, JUnit). A JVM trace prints bare file names, so they are resolved against the symbol index —
+  built on demand, and only when a frame could not otherwise be placed — which keeps the answer on
+  the project's own file instead of `AssertionFailureBuilder.java`. How many frames could not be
+  placed is stated in `notes`.
+- Percent-encoded `file:///` URLs (how `node --test` prints frames) are decoded, and paths are
+  matched with a non-ASCII-tolerant pattern, so a workspace under `C:\Users\王贝波\…` is not split
+  mid-path. TAP diagnostic keys (`error: |-`, `code: 'ERR_ASSERTION'`) are not returned as evidence.
 
 ---
 

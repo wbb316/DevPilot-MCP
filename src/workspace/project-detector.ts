@@ -603,9 +603,12 @@ function inferCommands(inputs: CommandInputs): {
 
   switch (inputs.buildSystem) {
     case 'maven':
-      candidates.build = 'mvn -q -DskipTests package';
-      candidates.test = 'mvn -q test';
-      if (inputs.framework === 'Spring Boot') candidates.run = 'mvn -q spring-boot:run';
+      // `-B` (batch) instead of `-q` on every Maven candidate: quiet mode hides the
+      // `Tests run:`/startup lines DevPilot parses, which is how a green suite ended up
+      // advertised as "0 tests" (Phase 10 acceptance).
+      candidates.build = 'mvn -B -DskipTests package';
+      candidates.test = 'mvn -B test';
+      if (inputs.framework === 'Spring Boot') candidates.run = 'mvn -B spring-boot:run';
       break;
     case 'gradle':
       candidates.build = './gradlew build --no-daemon';

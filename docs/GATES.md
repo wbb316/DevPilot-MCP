@@ -427,4 +427,51 @@ nested string literal inside an f-string to stay visible. Each was decided by ch
 documented contract before touching product code — and in the rollback case the same discipline
 went the other way and changed the contract.
 
+## Phase 10b — Language-stack acceptance (Python · Maven · Node)
+
+Command: `node tools\stack-acceptance.mjs --stack=<maven|node> --out=docs/evidence/<stack>.json`.
+Each stack copies its fixture into a temp directory, `git init`s it, and runs the whole loop:
+open → scan → symbol → add a failing test → checkpoint → build → `run_tests` (must fail) →
+`diagnose_failure` → **fix the real defect** → `run_tests` (must pass *with counts*) →
+`review_diff` → `rollback` → `run_tests` (must fail again) → close. The defect is real: the Maven
+fixture's `lengthOfTitle` has no null check, the Node fixture's `divide` throws the wrong error type.
+
+```
+maven 13/13   Java 17 (JAVA_HOME=D:\JDK\JDK17) via Maven 3.9.11 — real `mvn -B test`
+node  13/13   Node 22 — real `npm test` (node --test)
+python 22/22  Phase 10 stages above (D:\Projects\devpilot-demo)
+```
+
+Gate record: run after the last source change, with `tsc` exit 0 and 45 test files / 359 tests green.
+
+### Four defects only a real runner could show
+
+1. **A Maven failure was located inside JUnit.** Surefire's first stack frame is
+   `AssertionFailureBuilder.java:151`, and the parser took the first frame — so `failures[0].path`
+   pointed at framework internals that are not even in the workspace. Frames are now scored
+   (the test's own class > project code > framework) and the canonical failure object is reused
+   (a dedup branch used to write stack frames onto a discarded copy, losing every path).
+2. **`mvn -q test` hides its own summary when it passes.** So a green run reported
+   `status passed, total 0` — the exact "0 tests, all good" shape this project exists to prevent.
+   Maven now runs `-B` in *both* places that publish a command (the test planner and the profile's
+   `candidates`); the acceptance run demands `total >= 2`, which is what made the second place
+   visible after the first was fixed.
+3. **`exit 0` with no readable summary was reported as `passed`.** Phase 5 had fixed that for
+   pytest's `-q` only. `TestStatus` gained `'unknown'`, decided by a pure `decideTestStatus()`, and
+   all three exits (tool, `run_test`, CLI) report it as UNVERIFIED rather than green.
+4. **A non-ASCII profile path broke frame extraction twice.** An ASCII-only path pattern split
+   `C:\Users\王贝波\…` after the CJK characters, and inside node's percent-encoded `file:///` URL it
+   bit off `A2/AppData/…` from `%E6%B3%A2`. Paths are now matched with a unicode-tolerant class,
+   `file:///` URLs are percent-decoded, and a frame is only preferred when it can be verified
+   against the workspace — bare JVM names are resolved through the index (built on demand, and only
+   when a frame could not be placed).
+
+### Evidence quality is part of the contract
+
+The acceptance evidence showed `error: |-` as a diagnostic *evidence* line: `node --test` TAP keys
+(`error: |-`, `code: 'ERR_ASSERTION'`, `duration_ms`) match EVIDENCE_PATTERN through the words
+"error" and "assert" while saying nothing. They are now filtered — but only the key-with-machine-
+value shapes, so `error: Expected 1 to be 2` stays, because there the text is the evidence.
+
+
 

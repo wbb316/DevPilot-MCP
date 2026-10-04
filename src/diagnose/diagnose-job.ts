@@ -1,16 +1,20 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { errors } from '../errors/devpilot-error.js';
 import { isInside, isSensitiveFile, toPosix } from '../security/path-policy.js';
 import { GitManager } from '../git/git-manager.js';
 import { JobStore } from '../runner/job-store.js';
-import { cachedSymbolIndex } from '../code/index-registry.js';
+import { acquireSymbolIndex, cachedSymbolIndex } from '../code/index-registry.js';
+import type { SymbolIndex } from '../code/symbol-index.js';
+import type { DevPilotConfig } from '../config/config-schema.js';
 import type { Logger } from '../log/logger.js';
 import type { WorkspacePaths } from '../types/workspace.js';
 import type { DiagnosisLocation, DiagnosisResult } from '../types/diagnosis.js';
 import type { JobRecord } from '../types/execution.js';
 import { DEFAULT_MAX_EVIDENCE, analyzeFailure, buildDiagnosis } from './diagnose.js';
+import type { AnalyzeOptions } from './diagnose.js';
+import type { LocationScanOptions } from './location.js';
 
 /**
  * The diagnosis use case, shared by the `diagnose_failure` MCP tool and `devpilot diagnose`.
@@ -27,6 +31,8 @@ export interface DiagnoseJobRequest {
   paths: WorkspacePaths;
   /** Used to reuse an in-memory symbol index for `import_related` suspects, when one exists. */
   workspaceId?: string;
+  /** Needed to build the index on demand when bare JVM file names have to be resolved. */
+  config?: DevPilotConfig;
   logger?: Logger;
   jobId?: string;
   command?: string;
@@ -58,10 +64,32 @@ export async function diagnoseJob(request: DiagnoseJobRequest): Promise<Diagnosi
   const sensitiveLog = isSensitiveFile(logTarget);
   const subject = sensitiveLog ? '' : transcript.text;
 
-  const analysis = analyzeFailure(subject, root, {
-    ...(request.maxEvidence === undefined ? {} : { maxEvidence: request.maxEvidence }),
-    maxLocations: 5,
-  });
+  let index = request.workspaceId === undefined ? undefined : cachedSymbolIndex(request.workspaceId);
+  let analysis = analyzeFailure(subject, root, analyzeOptions(request, root, index));
+
+  // A JVM stack trace prints bare file names (`UserService.java`), which cannot be verified
+  // without the workspace file list. Building the index on demand is what keeps the primary
+  // location on the project's own file instead of JUnit's internals; it is paid for only when a
+  // frame actually failed to resolve, and the index then serves `import_related` suspects too.
+  if (
+    analysis.unresolvedFrames > 0 &&
+    index === undefined &&
+    request.workspaceId !== undefined &&
+    request.config !== undefined
+  ) {
+    try {
+      index = await acquireSymbolIndex({
+        id: request.workspaceId,
+        root,
+        paths: request.paths,
+        config: request.config,
+        ...(request.logger === undefined ? {} : { logger: request.logger }),
+      });
+      analysis = analyzeFailure(subject, root, analyzeOptions(request, root, index));
+    } catch {
+      /* best effort: unresolvable frames stay listed after the workspace locations */
+    }
+  }
 
   const extraEvidence: string[] = [];
   const extraNotes: string[] = [];
@@ -89,7 +117,6 @@ export async function diagnoseJob(request: DiagnoseJobRequest): Promise<Diagnosi
   }
 
   const changedFiles = await recentChanges(root, request.logger);
-  const index = request.workspaceId === undefined ? undefined : cachedSymbolIndex(request.workspaceId);
   const importersOf =
     index === undefined
       ? undefined
@@ -284,3 +311,39 @@ export async function recentChanges(
 }
 
 export { DEFAULT_MAX_EVIDENCE };
+
+function analyzeOptions(
+  request: DiagnoseJobRequest,
+  root: string,
+  index: SymbolIndex | undefined,
+): AnalyzeOptions {
+  return {
+    ...(request.maxEvidence === undefined ? {} : { maxEvidence: request.maxEvidence }),
+    maxLocations: 5,
+    locationOptions: locationOptionsFor(root, index),
+  };
+}
+
+/**
+ * Frame verification for the location scanner: existence on disk for relative frames, and a
+ * basename lookup so a JVM frame's bare file name becomes the workspace path it belongs to.
+ * The basename map is built lazily and only when a bare name is actually seen.
+ */
+function locationOptionsFor(root: string, index: SymbolIndex | undefined): LocationScanOptions {
+  let basenames: Map<string, string> | undefined;
+  return {
+    resolveBareName: (fileName) => {
+      if (index === undefined) return undefined;
+      if (basenames === undefined) {
+        basenames = new Map();
+        for (const filePath of index.filePaths()) {
+          const slash = filePath.lastIndexOf('/');
+          const base = (slash === -1 ? filePath : filePath.slice(slash + 1)).toLowerCase();
+          if (!basenames.has(base)) basenames.set(base, filePath);
+        }
+      }
+      return basenames.get(fileName.toLowerCase());
+    },
+    fileExists: (relativePath) => existsSync(path.join(root, relativePath)),
+  };
+}

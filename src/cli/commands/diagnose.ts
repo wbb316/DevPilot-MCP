@@ -29,6 +29,7 @@ export async function diagnoseCommand(io: CliIo, options: DiagnoseCommandOptions
   const id = opened.workspace.id;
   const paths = manager.pathsOf(id);
   const logger = manager.loggerOf(id);
+  const config = manager.configOf(id);
   if (paths === undefined) {
     throw errors.internal('workspace paths are not loaded after a successful open');
   }
@@ -37,6 +38,7 @@ export async function diagnoseCommand(io: CliIo, options: DiagnoseCommandOptions
     workspaceId: id,
     root: opened.workspace.root,
     paths,
+    ...(config === undefined ? {} : { config }),
     ...(logger === undefined ? {} : { logger }),
     ...(options.jobId === undefined ? {} : { jobId: options.jobId }),
     ...(options.logFile === undefined ? {} : { logFile: options.logFile }),

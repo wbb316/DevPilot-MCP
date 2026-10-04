@@ -62,7 +62,7 @@ Consequences to remember:
 
 | # | Step | DevPilot answer |
 | --- | --- | --- |
-| 1 | connected to DSH | `tools/list` returns the 18 tools under `mcp__devpilot__*` |
+| 1 | connected to DSH | `tools/list` returns the 19 tools under `mcp__devpilot__*` |
 | 2 | pick a real Git project | `open_workspace` |
 | 3 | scan it | `scan_project` |
 | 4 | "how do I run this project?" | `scan_project` → `profile.candidates.run` / `get_project_map` entrypoints |

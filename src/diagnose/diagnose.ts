@@ -9,6 +9,7 @@ import type {
 } from '../types/diagnosis.js';
 import { EVIDENCE_NOISE, EVIDENCE_PATTERN, classifyFailure, hintFor } from './patterns.js';
 import { extractLocations } from './location.js';
+import type { LocationScanOptions } from './location.js';
 
 /**
  * Diagnosis pipeline (docs/ARCHITECTURE.md §4.7): classify → locate → collect evidence →
@@ -23,6 +24,8 @@ export const DEFAULT_MAX_SUSPECTS = 12;
 export interface AnalyzeOptions {
   maxEvidence?: number;
   maxLocations?: number;
+  /** How to verify frames against the workspace (Phase 10: bare JVM file names, unicode paths). */
+  locationOptions?: LocationScanOptions;
 }
 
 export interface FailureAnalysis {
@@ -30,6 +33,8 @@ export interface FailureAnalysis {
   weight: 'strong' | 'weak';
   locations: DiagnosisLocation[];
   externalFrames: number;
+  /** Frames naming files that resolved nowhere in the workspace (dependency or JDK code). */
+  unresolvedFrames: number;
   evidence: string[];
   evidenceDropped: number;
 }
@@ -57,13 +62,19 @@ export function collectEvidence(text: string, max: number): { evidence: string[]
 
 export function analyzeFailure(text: string, root: string, options: AnalyzeOptions = {}): FailureAnalysis {
   const match = classifyFailure(text);
-  const scan = extractLocations(text, root, options.maxLocations ?? 8);
+  const scan = extractLocations(
+    text,
+    root,
+    options.maxLocations ?? 8,
+    options.locationOptions ?? {},
+  );
   const collected = collectEvidence(text, options.maxEvidence ?? DEFAULT_MAX_EVIDENCE);
   return {
     category: match.category,
     weight: match.weight,
     locations: scan.locations,
     externalFrames: scan.externalFrames,
+    unresolvedFrames: scan.unresolvedFrames,
     evidence: collected.evidence,
     evidenceDropped: collected.dropped,
   };
@@ -138,6 +149,11 @@ export function buildDiagnosis(input: BuildDiagnosisInput): DiagnosisResult {
   if (analysis.externalFrames > 0) {
     notes.push(
       `${analysis.externalFrames} stack frame(s) pointed outside the workspace (dependency or runtime code) and were ignored`,
+    );
+  }
+  if (analysis.unresolvedFrames > 0) {
+    notes.push(
+      `${analysis.unresolvedFrames} stack frame(s) named a file that is not in this workspace (dependency or JDK code); they are listed after the workspace locations`,
     );
   }
   if (analysis.evidenceDropped > 0) {

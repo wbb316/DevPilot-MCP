@@ -112,6 +112,18 @@ export const runTestTool = defineTool({
     if (output.result.status === 'failed' || output.result.status === 'error') {
       throw errors.testFailed(output.commandLine, output.result.job.exitCode ?? null, data);
     }
+    if (output.result.status === 'unknown') {
+      return ok(
+        `${output.commandLine} exited 0 but printed no machine-readable test summary — the result is UNVERIFIED`,
+        data,
+        {
+          warnings: [
+            ...output.notes,
+            `the run for ${args.target} could not be verified from the output: check the log or project.test_command`,
+          ],
+        },
+      );
+    }
     if (output.result.status === 'no_tests') {
       return ok(`${output.commandLine} collected no tests for ${args.target}`, data, {
         warnings: [

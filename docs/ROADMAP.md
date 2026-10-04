@@ -305,6 +305,14 @@ Gate evidence (`tools/v1-acceptance.mjs`, four stages, workspace `D:\Projects\de
 * `recon` 8/8 · `verify` 2/2 · `post` 5/5 · `rollback` 7/7 — 22 checks, 0 failures; raw envelopes
   in `docs/evidence/{recon,verify,post,rollback}.json`, after `tsc` exit 0 and 43 files / 346 tests
   green.
+* Language stacks (`tools/stack-acceptance.mjs`): **maven 13/13** and **node 13/13**, each running
+  the full loop on a real toolchain (Java 17 through Maven 3.9.11, Node 22 `node --test`) with a
+  real defect, a real fix and a real rollback; raw envelopes in `docs/evidence/{maven,node}.json`.
+  It found four defects unit tests could not: a Maven failure located inside JUnit
+  (`AssertionFailureBuilder.java`), `mvn -q test` hiding a green run's counts (reported as
+  `passed` with `total: 0`), `exit 0` with no readable summary reported as passed (now the
+  `unknown` status), and an ASCII-only path pattern splitting a non-ASCII profile path — and
+  taking percent-encoded `file:///` frame URLs for relative paths.
 * Wiring: profile `desktop` (`cordis.patch.yml`, backed up first) with
   `@deepseek-ai/dsh-mcp-client`; the exact stdio command DSH spawns answers the handshake in
   397 ms with 19 tools and exits cleanly on stdin EOF (`tools/mcp-probe.mjs`).

@@ -181,7 +181,10 @@ export function planTests(input: TestPlanInput, options: TestPlanOptions = {}): 
         args.push(...extraArgs);
         return { ...base, supported: true, command: gradleCommand(profile), args };
       }
-      const args = ['-q', 'test'];
+      // No `-q` on purpose (Phase 10): on success Surefire prints its `Tests run:` summary at
+      // INFO level, so quiet mode hides the only line we can parse and a green suite reads as
+      // "0 tests". `-B` keeps output stable without muting the summary.
+      const args = ['-B', 'test'];
       if (selector !== undefined && selector !== '') args.push(`-Dtest=${selector}`);
       if (options.failFast === true) args.push('-Dsurefire.skipAfterFailureCount=1');
       args.push(...extraArgs);

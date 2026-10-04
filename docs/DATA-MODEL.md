@@ -181,7 +181,9 @@ interface TestFailure { name: string; suite?: string; path?: string; line?: numb
 interface TestDuration { name: string; durationMs: number }
 
 interface TestResult {
-  status: 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests';
+  // `unknown` (Phase 10): the runner exited 0 without printing a machine-readable summary.
+  // An unverified run must never be reported as `passed` (see docs/GATES.md, Phase 10).
+  status: 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests' | 'unknown';
   framework: string; command: string; durationMs: number;
   total: number; passed: number; failed: number; skipped: number; errors: number;
   failures: TestFailure[]; job: JobRecord;

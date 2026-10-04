@@ -50,13 +50,14 @@ export const diagnoseFailureTool = defineTool({
   handler: async (args, context) => {
     const workspace = context.workspace;
     if (workspace === undefined) throw errors.workspaceNotOpen();
-    const { paths, logger } = requireWorkspaceContext(context.ctx, workspace);
+    const { config, paths, logger } = requireWorkspaceContext(context.ctx, workspace);
     const entry = await context.ctx.workspaces.resolveEntry(workspace.id);
 
     const result = await diagnoseJob({
       workspaceId: workspace.id,
       root: entry.state.root,
       paths,
+      config,
       ...(logger === undefined ? {} : { logger }),
       ...(args.jobId === undefined ? {} : { jobId: args.jobId }),
       ...(args.command === undefined ? {} : { command: args.command }),

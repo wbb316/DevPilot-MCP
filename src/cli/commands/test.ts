@@ -68,6 +68,10 @@ export async function testCommand(io: CliIo, options: TestCommandOptions): Promi
   }
 
   if (result.status === 'passed') return 0;
+  if (result.status === 'unknown') {
+    io.stderr('devpilot: the runner printed no machine-readable summary — the run is unverified\n');
+    return 1;
+  }
   if (result.status === 'no_tests') {
     io.stderr('devpilot: no tests were collected (check the filter/file or project.test_command)\n');
     return 1;

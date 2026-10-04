@@ -62,7 +62,12 @@ export interface RunResult {
  * agent reading the log: `parsed` says whether a machine-readable summary was actually found,
  * so a silent parse failure cannot be mistaken for "all tests passed".
  */
-export type TestStatus = 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests';
+/**
+ * `unknown` (Phase 10) is the honest answer when the runner exited 0 but printed no
+ * machine-readable summary: calling that `passed` turned "I could not read the result" into
+ * "everything is green".
+ */
+export type TestStatus = 'passed' | 'failed' | 'error' | 'timeout' | 'no_tests' | 'unknown';
 
 export interface TestFailure {
   name: string;

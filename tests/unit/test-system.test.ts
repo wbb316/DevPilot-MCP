@@ -70,7 +70,7 @@ describe('planTests', () => {
     const { plan, framework } = await planFixture('maven-project', { filter: 'UserServiceTest#lengthOfTitle' });
     expect(framework).toBe('junit');
     expect(plan.command).toBe('mvn');
-    expect(plan.args).toEqual(['-q', 'test', '-Dtest=UserServiceTest#lengthOfTitle']);
+    expect(plan.args).toEqual(['-B', 'test', '-Dtest=UserServiceTest#lengthOfTitle']);
   });
 
   it('plans the declared node --test script for the Node fixture', async () => {

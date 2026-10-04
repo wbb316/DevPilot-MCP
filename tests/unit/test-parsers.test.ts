@@ -122,6 +122,25 @@ describe('parseJunit', () => {
     expect(parsed.failures[0]?.line).toBe(12);
   });
 
+  it('locates the failure in the test class, not in JUnit internals (Phase 10 real output)', () => {
+    const text = [
+      '[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.047 s <<< FAILURE! -- in com.example.TitleLengthTest',
+      '[ERROR] com.example.TitleLengthTest.lengthOfTitleRejectsNullInput -- Time elapsed: 0.023 s <<< FAILURE!',
+      'org.opentest4j.AssertionFailedError: Unexpected exception type thrown, expected: <java.lang.IllegalArgumentException> but was: <java.lang.NullPointerException>',
+      '\tat org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)',
+      '\tat org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:67)',
+      '\tat com.example.TitleLengthTest.lengthOfTitleRejectsNullInput(TitleLengthTest.java:13)',
+      '\tat com.example.UserService.lengthOfTitle(UserService.java:13)',
+      '[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0',
+    ].join('\n');
+    const parsed = parseJunit(text, '');
+    expect(parsed.parsed).toBe(true);
+    expect(parsed.failed).toBe(1);
+    expect(parsed.failures[0]?.path).toBe('TitleLengthTest.java');
+    expect(parsed.failures[0]?.line).toBe(13);
+    expect(parsed.failures[0]?.stackHead?.[0]).toContain('AssertionFailureBuilder');
+  });
+
   it('reads Gradle output', () => {
     const text = [
       '> Task :test FAILED',

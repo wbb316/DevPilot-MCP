@@ -250,7 +250,7 @@ export function parseNodeTest(stdout: string, stderr: string): ParsedTests {
     current.stackHead = stackHeadOf(
       body.filter(
         (line) =>
-          !/^(duration_ms|type|location|failureType|code|name|stack|compare|operator|expected|actual):/.test(
+          !/^(duration_ms|type|location|failureType|code|name|stack|error|compare|operator|expected|actual):/.test(
             line,
           ),
       ),

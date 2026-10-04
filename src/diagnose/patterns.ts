@@ -200,5 +200,13 @@ export function classifyFailure(text: string): RuleMatch {
 export const EVIDENCE_PATTERN =
   /(?:\berror\b|\bexception\b|\bfailed\b|\bfailure\b|traceback|assert|caused by|\bat\s+\S+\(|\bFile "|E\s{2,}|npm ERR!|\[ERROR\]|panic:|fatal:|^\s*\d+ (?:passed|failed))/i;
 
-/** Frames/lines that carry a source location but are pure noise as evidence. */
-export const EVIDENCE_NOISE = /^\s*(?:at\s+(?:node:|internal\/|native)|Note:|DeprecationWarning)/;
+/**
+ * Lines that carry a source location but are pure noise as evidence.
+ *
+ * The second alternative drops `node --test` TAP diagnostic *keys* — `error: |-`,
+ * `code: 'ERR_ASSERTION'`, `duration_ms: 5.238` — which match EVIDENCE_PATTERN through the words
+ * "error" and "assert" without saying anything. A key whose value is prose
+ * (`error: Expected 1 to be 2`) is kept, because there the text is the evidence.
+ */
+export const EVIDENCE_NOISE =
+  /^\s*(?:at\s+(?:node:|internal\/|native)|Note:|DeprecationWarning)|^\s*(?:error|code|location|failureType|duration_ms|operator|expected|actual|compare|type|name|stack):\s*(?:\|-?|\||'[^']*'|"[^"]*"|-?\d+(?:\.\d+)?)\s*$/;

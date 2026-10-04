@@ -82,7 +82,7 @@ describe('scanProject', () => {
     expect(result.profile.markers).toContain('pom.xml');
     expect(result.profile.languages).toContain('Java');
     expect(result.profile.buildSystem).toBe('maven');
-    expect(result.profile.candidates.test).toBe('mvn -q test');
+    expect(result.profile.candidates.test).toBe('mvn -B test');
     expect(result.languages['java']?.files).toBeGreaterThanOrEqual(4);
   }, 30_000);
 

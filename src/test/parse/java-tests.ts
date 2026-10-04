@@ -27,6 +27,23 @@ function shortName(fqcn: string): string {
   return dot > 0 ? fqcn.slice(dot + 1) : fqcn;
 }
 
+/** Frames that belong to the tooling itself, never to the project under test. */
+const FRAMEWORK_CLASS =
+  /^(?:java|javax|jdk|sun|com\.sun|junit|org\.junit|org\.opentest4j|org\.apiguardian|org\.gradle|org\.apache\.maven|org\.mockito|org\.assertj|org\.hamcrest|kotlin|kotlinx)\./;
+
+/**
+ * How good a stack frame is as the *location* of a failure: the failing test's own class beats
+ * project code, which beats framework internals. Phase 10 acceptance showed that Surefire's
+ * first frame is JUnit's own `AssertionFailureBuilder.java`, so the naive "first frame wins"
+ * rule pointed the agent at JUnit instead of at the test that failed.
+ */
+function scoreFrame(className: string, suite: string | undefined): number {
+  if (suite !== undefined && suite !== '' && (className === suite || shortName(className) === shortName(suite))) {
+    return 2;
+  }
+  return FRAMEWORK_CLASS.test(className) ? 0 : 1;
+}
+
 function keyOf(failure: TestFailure): string {
   return `${shortName(failure.suite ?? '')}#${failure.name}`;
 }
@@ -64,13 +81,13 @@ export function parseJunit(stdout: string, stderr: string): ParsedTests {
 
   const failures: TestFailure[] = [];
   const byKey = new Map<string, TestFailure>();
-  const push = (failure: TestFailure): void => {
+  const push = (failure: TestFailure): TestFailure => {
     const key = keyOf(failure);
     const existing = byKey.get(key);
     if (existing === undefined) {
       byKey.set(key, failure);
       failures.push(failure);
-      return;
+      return failure;
     }
     if (existing.message.startsWith('FAILURE') || existing.message.startsWith('ERROR')) {
       existing.message = failure.message;
@@ -81,9 +98,11 @@ export function parseJunit(stdout: string, stderr: string): ParsedTests {
     existing.path = existing.path ?? failure.path;
     existing.line = existing.line ?? failure.line;
     existing.stackHead = existing.stackHead ?? failure.stackHead;
+    return existing;
   };
 
   let pending: TestFailure | undefined;
+  let pendingScore = -1;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -103,31 +122,38 @@ export function parseJunit(stdout: string, stderr: string): ParsedTests {
     if (header !== null) {
       const token = header[1] ?? '';
       const dot = token.lastIndexOf('.');
-      pending = {
+      pending = push({
         name: dot > 0 ? token.slice(dot + 1) : token,
         suite: dot > 0 ? token.slice(0, dot) : '',
         message: header[2] ?? 'FAILURE',
-      };
-      push(pending);
+      });
+      pendingScore = -1;
       continue;
     }
 
     const detailed = SUREFIRE_DETAILED.exec(line);
     if (detailed !== null && /^\[ERROR\]\s+[\w.$]+\.\w+:\d+/.test(line)) {
-      pending = {
+      // Keep the canonical object: a following stack frame must improve the *stored* failure,
+      // not a copy that never reaches the result.
+      pending = push({
         name: detailed[2] ?? '',
         suite: detailed[1] ?? '',
         line: Number(detailed[3]),
         message: (detailed[4] ?? '').trim() || 'assertion failed',
-      };
-      push(pending);
+      });
+      pendingScore = -1;
       continue;
     }
 
     const frame = JAVA_STACK_FRAME.exec(rawLine);
     if (frame !== null && pending !== undefined) {
-      pending.path = pending.path ?? frame[3];
-      pending.line = pending.line ?? Number(frame[4]);
+      // Fill the location from the first frame, then upgrade it when a better frame shows up.
+      const score = scoreFrame(frame[1] ?? '', pending.suite);
+      if (pending.path === undefined || score > pendingScore) {
+        pending.path = frame[3];
+        pending.line = Number(frame[4]);
+        pendingScore = score;
+      }
       const head = pending.stackHead ?? [];
       if (head.length < 3) head.push(line);
       pending.stackHead = head;

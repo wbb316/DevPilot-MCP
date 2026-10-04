@@ -43,6 +43,34 @@ export interface TestRunnerOutput {
   notes: string[];
 }
 
+export interface TestStatusInput {
+  timedOut: boolean;
+  exitCode: number | null;
+  /** Whether a machine-readable summary was actually found in the output. */
+  parsed: boolean;
+  noTestsDetected: boolean;
+  total: number;
+  failed: number;
+  errors: number;
+}
+
+/**
+ * The status decision, separated so it can be unit-tested without spawning a runner.
+ *
+ * Exit code 0 only means `passed` when a summary was really read. Phase 10 acceptance ran the
+ * Maven fixture with `mvn -q test`, which hides Surefire's `Tests run:` line on success — the
+ * old logic called that "passed" with `total: 0`, i.e. a green light nobody could verify.
+ */
+export function decideTestStatus(input: TestStatusInput): TestStatus {
+  if (input.timedOut) return 'timeout';
+  if (input.exitCode === 0) {
+    if (input.noTestsDetected || (input.parsed && input.total === 0)) return 'no_tests';
+    return input.parsed ? 'passed' : 'unknown';
+  }
+  if (input.failed > 0 || input.errors > 0) return 'failed';
+  return 'error';
+}
+
 export async function runTests(input: TestRunnerInput): Promise<TestRunnerOutput> {
   const { config, profile, paths } = input;
   const manifest = await readNodeTestManifest(input.root);
@@ -110,14 +138,22 @@ export async function runTests(input: TestRunnerInput): Promise<TestRunnerOutput
 
   const parsed = parseTestOutput(plan.framework, run.stdout, run.stderr);
 
-  let status: TestStatus;
-  if (run.timedOut) status = 'timeout';
-  else if (run.exitCode === 0) {
-    status = parsed.noTestsDetected || (parsed.parsed && parsed.total === 0) ? 'no_tests' : 'passed';
-  } else if (parsed.failed > 0 || parsed.errors > 0) status = 'failed';
-  else status = 'error';
+  const status = decideTestStatus({
+    timedOut: run.timedOut,
+    exitCode: run.exitCode,
+    parsed: parsed.parsed,
+    noTestsDetected: parsed.noTestsDetected,
+    total: parsed.total,
+    failed: parsed.failed,
+    errors: parsed.errors,
+  });
 
   const notes = [...plan.notes];
+  if (status === 'unknown') {
+    notes.push(
+      'the runner exited 0 but printed no machine-readable summary: this run is UNVERIFIED, not a pass',
+    );
+  }
   if (!parsed.parsed) {
     notes.push(
       `no machine-readable test summary was found in the output; read ${logFile} (counts are not reliable)`,
