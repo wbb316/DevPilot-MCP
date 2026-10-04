@@ -59,15 +59,19 @@ describe('CLI', () => {
     expect(version.out.join('').trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it('rejects unknown and unimplemented commands with exit code 2', async () => {
+  it('rejects unknown commands with exit code 2', async () => {
     const unknown = capture(env, workspace);
     expect(await runCli(['frobnicate'], unknown.io)).toBe(2);
     expect(unknown.err.join('')).toMatch(/Unknown command: frobnicate/);
-
-    const doctor = capture(env, workspace);
-    expect(await runCli(['doctor'], doctor.io)).toBe(2);
-    expect(doctor.err.join('')).toMatch(/Phase 9/);
   });
+
+  it('runs doctor against this machine', async () => {
+    const doctor = capture(env, workspace);
+    const code = await runCli(['doctor', workspace], doctor.io);
+    expect([0, 1]).toContain(code);
+    expect(doctor.out.join('')).toMatch(/Toolchains:/);
+    expect(doctor.out.join('')).toMatch(/Overall: (OK|WARNING|ERROR)/);
+  }, 120_000);
 
   it('scans a project, prints the summary and reuses the cache', async () => {
     const first = capture(env, workspace);

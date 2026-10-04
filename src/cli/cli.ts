@@ -6,6 +6,7 @@ import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
 import { testCommand } from './commands/test.js';
 import { diagnoseCommand } from './commands/diagnose.js';
+import { doctorCommand } from './commands/doctor.js';
 
 /**
  * Human-facing CLI (docs/ARCHITECTURE.md §3). The MCP server is the product; this keeps
@@ -41,10 +42,11 @@ Commands:
       --max-evidence=<n>  how many key lines to print (default 8)
       --json              machine-readable output
   serve              Start the MCP server on stdio (used by MCP clients)
+  doctor [path]      Diagnose the local toolchain (git, node, python, java, maven, CUDA, ...)
+      --verbose           include the probe inventory
+      --json              machine-readable output
   version            Print the version
   help               Show this help
-
-Not yet implemented (roadmap phases): doctor (9)
 `;
 
 interface ParsedArgv {
@@ -149,12 +151,12 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
         json,
       });
     }
-    case 'doctor': {
-      io.stderr(
-        `devpilot ${command} is not implemented yet (roadmap Phase 9). Start the server with \`devpilot serve\` and call the MCP tools instead.\n`,
-      );
-      return 2;
-    }
+    case 'doctor':
+      return doctorCommand(io, {
+        target: parsed.positionals[0] ?? io.cwd,
+        verbose: parsed.flags.has('verbose'),
+        json,
+      });
     default:
       io.stderr(`Unknown command: ${command}\n\n${USAGE}`);
       return 2;

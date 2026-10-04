@@ -6,6 +6,8 @@ import { errors } from '../errors/devpilot-error.js';
 import { ok } from '../errors/envelope.js';
 import { GitManager } from '../git/git-manager.js';
 import { analyzeDiff } from '../git/diff-analyzer.js';
+import { resolveLimits } from '../config/config-schema.js';
+import { checkChangeLimits } from '../security/change-limits.js';
 import { requireWorkspaceContext } from './scan-project.js';
 import { workspacePathSchema } from './shared.js';
 
@@ -37,7 +39,7 @@ export const reviewDiffTool = defineTool({
   handler: async (args, context) => {
     const workspace = context.workspace;
     if (workspace === undefined) throw errors.workspaceNotOpen();
-    const { paths } = requireWorkspaceContext(context.ctx, workspace);
+    const { config, paths } = requireWorkspaceContext(context.ctx, workspace);
     const entry = await context.ctx.workspaces.resolveEntry(workspace.id);
 
     const git = new GitManager({ cwd: entry.state.root, timeoutMs: 30_000 });
@@ -55,19 +57,24 @@ export const reviewDiffTool = defineTool({
     });
 
     const review: DiffReview = result.review;
+    const changeLimits = checkChangeLimits(review.totals, resolveLimits(config));
     const summary =
       review.totals.files === 0
         ? 'no changes against the base'
         : `${review.totals.files} file(s) changed, +${review.totals.addedLines} -${review.totals.deletedLines}, risk ${review.riskLevel}` +
           `${review.highRisk.length === 0 ? '' : `, ${review.highRisk.length} high-risk file(s)`}` +
-          `${review.affectedTests.length === 0 ? '' : `, ${review.affectedTests.length} test file(s) touched`}`;
+          `${review.affectedTests.length === 0 ? '' : `, ${review.affectedTests.length} test file(s) touched`}` +
+          `${changeLimits.exceeded ? ', change budget exceeded' : ''}`;
 
     const artifacts: Record<string, string> = {};
     if (review.patchArtifact !== undefined) artifacts['patch'] = review.patchArtifact;
 
-    return ok(summary, review, {
+    const warnings = [...(review.notes ?? [])];
+    if (changeLimits.advice !== undefined) warnings.push(changeLimits.advice);
+
+    return ok(summary, { ...review, changeLimits }, {
       artifacts,
-      warnings: review.notes ?? [],
+      warnings,
     });
   },
 });

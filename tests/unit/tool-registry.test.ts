@@ -107,6 +107,8 @@ describe('tool registry', () => {
       'create_checkpoint',
       'rollback_checkpoint',
       'impact_analysis',
+      'doctor',
+      'dependency_audit',
     ]);
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {},
@@ -115,7 +117,9 @@ describe('tool registry', () => {
       'build_project',
       'close_workspace',
       'create_checkpoint',
+      'dependency_audit',
       'diagnose_failure',
+      'doctor',
       'find_references',
       'find_symbol',
       'get_git_status',

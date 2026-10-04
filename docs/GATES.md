@@ -296,3 +296,77 @@ Behaviour pinned at this gate:
 - Every answer ends with the `method heuristic` note. A lexical index cannot resolve
   receiver-typed calls, so the tool says that instead of implying compiler precision.
 
+---
+
+## Phase 9 — Security hardening, environment doctor, dependency audit
+
+Gate command: `node node_modules/typescript/bin/tsc -p tsconfig.json` → 0 errors, then
+`node node_modules/vitest/vitest.mjs run` → **41 files / 332 tests passed** (Phase 8: 34/270).
+
+```text
+tests/integration/security-attack.test.ts   7 passed
+  traversal logFile=../../outside/secret.log  → refused, no outside content in the result
+  workspace junction → outside directory      → refused (this was a real hole, see below)
+  format C: /y · diskpart · rm -rf /          → COMMAND_NOT_ALLOWED, nothing spawned
+  logFile=.env                                → success, evidence empty, "sensitive file" warning
+  credential inside an ordinary build.log     → replaced by [redacted] + warning naming the rule
+  target=../../outside                        → treated as a symbol, no path escapes the workspace
+  2 changed files, max_files_changed: 1       → changeLimits.exceeded + "stage the work" advice
+
+devpilot doctor (real machine) → overall WARNING
+  OK   git 2.51.1 · node 22.23.2 · npm 12.1.0 · pnpm 11.23.0 · python 3.11.9 · python3 3.12.11
+       pip 24.0 · conda 22.9.0 · java 17.0.19 · javac 17.0.19 · mvn 3.9.11 · docker 29.1.3 · nvcc 11.3
+  WARN 4 python installations · 6 java installations · CUDA toolkit 11.3 vs torch 2.11.0+cpu
+       · docker CLI present but the daemon is unreachable · yarn/gradle/nvidia-smi absent
+```
+
+Five defects this gate found (all fixed in the implementation):
+
+1. **Containment was lexical only.** `isInside(root, candidate)` is a string test, so a directory
+   junction *inside* the workspace pointing outside it passed — `diagnose_failure({logFile:'link/secret.log'})`
+   returned `success: true` and had genuinely read a file outside the workspace. It only escaped
+   notice because the evidence regex happened not to match that line: luck, not safety. Both sides of
+   the comparison are now `realpath`ed for every path that is used to read a file, and the lexical
+   check stays only to produce a precise error message.
+2. **The dotenv redaction rule matched ordinary code.** Case-insensitive and line-anchored, it
+   rewrote `access_token_expiry_seconds = 3600` into `[redacted]`. The rule is now uppercase-key only
+   and unanchored, so it still catches `DB_PASSWORD=…` embedded in an error line but leaves ordinary
+   constants alone.
+3. **`poetry.lock` and `uv.lock` were parsed as YAML.** They are TOML (`[[package]]` tables); the YAML
+   parser threw, the lock index came back empty, and the audit reported **zero transitives** for
+   projects that do have a resolved graph — an audit tool silently under-reporting is worse than one
+   that fails. A narrow TOML table reader now handles them.
+4. **Maven `<!-- -->` comments were counted as dependencies**, so a commented-out `<dependency>`
+   became a fourth direct dependency. pom.xml is now stripped of XML comments (the JS/Gradle comment
+   stripper is no longer used on XML, where `//` inside a URL is not a comment).
+5. **A missing lockfile was blamed on the alphabetically first manifest.** With both
+   `pyproject.toml` (declaring nothing) and `requirements.txt` present, the ERROR landed on
+   `pyproject.toml`. Ecosystem-level facts are now attributed to the manifest that actually declares
+   the dependencies.
+
+Delegation lesson: `dependency_audit` was written by a subagent that was stopped mid-flight with
+**four of its own tests failing**. Three of the four were implementation bugs (2, 3, 5 above plus the
+severity rule for cross-module Maven duplicates, which now reports ERROR because one JVM classpath
+cannot hold two versions of an artifact, while npm's legitimate nesting stays a WARNING); one was a
+stale expectation (the python fixture also has a `pyproject.toml`, so the manifest list legitimately
+holds two paths). Each was adjudicated by reading both sides and deciding which one the evidence
+supported — never by editing the assertion to match the output.
+
+Behaviour pinned at this gate:
+
+- Secret redaction sits in `ok()` / `fail()` — the single choke point every tool result passes
+  through — so a tool added later cannot forget it, and both the summary and the failure envelope
+  (`message`, `hint`, `details`) are covered. The envelope says how many values were replaced and
+  which rule kinds fired, so a redacted value is never mistaken for the real one.
+- A file that *looks* secret-bearing is treated more strongly than a redaction: `diagnose_failure`
+  analyses nothing from it, returns an empty evidence list, and says only that it exists. The patch
+  artifact is redacted before it is written to disk, and `review_diff` names the secret-bearing paths
+  in its notes.
+- Probe code must go through `runExecutable`, not `runProcess`: `npm`, `pnpm`, `mvn` and `gradle` are
+  Windows `.cmd` shims, and the first `doctor` run reported them as missing from the machine. A probe
+  that cannot start a tool must report "present, version not parsed" — never invent a version, and
+  never blame the user's machine for the probe's own limitation.
+- A change set over `max_files_changed` / `max_lines_changed` is reported with per-limit violations
+  and staging advice; `0` means "no budget configured" and is never a violation.
+
+

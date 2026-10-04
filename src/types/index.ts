@@ -94,3 +94,10 @@ export type {
   ImpactRiskLevel,
   ImpactTargetKind,
 } from './impact.js';
+
+export type {
+  CheckStatus,
+  EnvironmentReport,
+  OsInfo,
+  ToolchainCheck,
+} from './environment.js';

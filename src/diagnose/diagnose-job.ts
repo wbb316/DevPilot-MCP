@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { errors } from '../errors/devpilot-error.js';
-import { isInside, toPosix } from '../security/path-policy.js';
+import { isInside, isSensitiveFile, toPosix } from '../security/path-policy.js';
 import { GitManager } from '../git/git-manager.js';
 import { JobStore } from '../runner/job-store.js';
 import { cachedSymbolIndex } from '../code/index-registry.js';
@@ -52,22 +52,36 @@ export async function diagnoseJob(request: DiagnoseJobRequest): Promise<Diagnosi
     );
   }
 
-  const logTarget = resolveLogTarget(root, job, request.logFile);
+  const logTarget = await resolveLogTarget(root, job, request.logFile);
   const transcript = await readLogTail(logTarget);
+  // A secret-bearing log is never analysed: DevPilot reports that it exists, nothing more.
+  const sensitiveLog = isSensitiveFile(logTarget);
+  const subject = sensitiveLog ? '' : transcript.text;
 
-  const analysis = analyzeFailure(transcript.text, root, {
+  const analysis = analyzeFailure(subject, root, {
     ...(request.maxEvidence === undefined ? {} : { maxEvidence: request.maxEvidence }),
     maxLocations: 5,
   });
 
   const extraEvidence: string[] = [];
+  const extraNotes: string[] = [];
+  if (sensitiveLog) {
+    extraNotes.push(
+      `${toPosix(path.relative(root, logTarget))} is a sensitive file: its contents were not analysed`,
+    );
+  }
   const primary = analysis.locations[0];
   if (primary !== undefined) {
-    const line = await sourceLine(root, primary);
-    if (line !== undefined) extraEvidence.push(line);
+    if (isSensitiveFile(path.join(root, primary.path))) {
+      extraNotes.push(
+        `source line withheld: ${primary.path} looks secret-bearing (existence is reported, contents are not)`,
+      );
+    } else {
+      const line = await sourceLine(root, primary);
+      if (line !== undefined) extraEvidence.push(line);
+    }
   }
 
-  const extraNotes: string[] = [];
   if (transcript.truncated) {
     extraNotes.push(
       `only the last ${Math.round(transcript.bytes / 1024)} KiB of the log were analysed (${Math.round(transcript.totalBytes / 1024)} KiB on disk)`,
@@ -93,7 +107,7 @@ export async function diagnoseJob(request: DiagnoseJobRequest): Promise<Diagnosi
 
   return buildDiagnosis({
     analysis,
-    text: transcript.text,
+    text: subject,
     ...(job === undefined ? {} : { job }),
     logFile: toPosix(path.relative(root, logTarget)),
     changedFiles,
@@ -137,12 +151,30 @@ async function selectJob(
   return recent[0];
 }
 
-function resolveLogTarget(root: string, job: JobRecord | undefined, logFile?: string): string {
-  if (logFile !== undefined) {
-    const target = path.resolve(root, logFile);
-    if (!isInside(root, target)) throw errors.pathOutsideWorkspace(toPosix(logFile), toPosix(root));
-    return target;
+/**
+ * A lexical `isInside` check is not enough: a junction or symlink inside the workspace can point at
+ * a directory outside it, so the *real* path of the log has to be inside the *real* workspace root
+ * too (Phase 9 attack fixtures). Both roots are realpath'd, which also handles a workspace reached
+ * through a mapped drive or a symlinked checkout.
+ */
+async function resolveLogTarget(
+  root: string,
+  job: JobRecord | undefined,
+  logFile?: string,
+): Promise<string> {
+  const candidate =
+    logFile !== undefined ? path.resolve(root, logFile) : resolveStoredLog(root, job);
+  const label = toPosix(logFile ?? candidate);
+  if (!isInside(root, candidate)) throw errors.pathOutsideWorkspace(label, toPosix(root));
+
+  const [real, realRoot] = await Promise.all([realpathOrUndefined(candidate), realpathOrUndefined(root)]);
+  if (real !== undefined && realRoot !== undefined && !isInside(realRoot, real)) {
+    throw errors.pathOutsideWorkspace(label, toPosix(root));
   }
+  return candidate;
+}
+
+function resolveStoredLog(root: string, job: JobRecord | undefined): string {
   const stored = job?.logFile;
   if (stored === undefined || stored === '') {
     throw errors.fileNotFound(
@@ -151,9 +183,15 @@ function resolveLogTarget(root: string, job: JobRecord | undefined, logFile?: st
       'Pass logFile with a workspace-relative path.',
     );
   }
-  const target = path.isAbsolute(stored) ? stored : path.resolve(root, stored);
-  if (!isInside(root, target)) throw errors.pathOutsideWorkspace(toPosix(target), toPosix(root));
-  return target;
+  return path.isAbsolute(stored) ? stored : path.resolve(root, stored);
+}
+
+async function realpathOrUndefined(target: string): Promise<string | undefined> {
+  try {
+    return await fs.realpath(target);
+  } catch {
+    return undefined;
+  }
 }
 
 interface LogTail {
@@ -194,6 +232,10 @@ async function sourceLine(root: string, location: DiagnosisLocation): Promise<st
   if (location.line === undefined) return undefined;
   const target = path.resolve(root, location.path);
   if (!isInside(root, target)) return undefined;
+  // Same reasoning as resolveLogTarget: a junction inside the workspace must not let a stack frame
+  // point DevPilot at a file outside it.
+  const [real, realRoot] = await Promise.all([realpathOrUndefined(target), realpathOrUndefined(root)]);
+  if (real === undefined || realRoot === undefined || !isInside(realRoot, real)) return undefined;
   try {
     const text = await fs.readFile(target, 'utf8');
     const line = text.split(/\r?\n/)[location.line - 1];

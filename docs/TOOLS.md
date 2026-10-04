@@ -347,6 +347,31 @@ Notes fixed with Phase 8:
 ### `dependency_audit` — RO
 `data`: `{ ecosystems[], direct, transitive, outdated[], vulnerable[]?, lockIssues[] }` (network optional).
 
+Notes fixed with Phase 9:
+
+- `doctor` is machine-scoped: it takes no `path`. When a workspace is open, its root is the
+  directory the project-aware checks use; otherwise the server's working directory is. It is
+  read-only by construction — nothing in it installs, upgrades or reconfigures a toolchain.
+- A version is reported only when it was parsed out of the tool's own output. A probe that timed out
+  reports the tool as present with `message` explaining the timeout, and the timeout is listed in
+  `notes`; `doctor` never invents a version.
+- Probes go through `runExecutable`, so Windows `.cmd` shims (`npm.cmd`, `mvn.cmd`) are resolved
+  rather than reported missing — that distinction is the difference between a useful report and a
+  misleading one.
+- Conflicts are the point of the tool: several pythons / JDKs / node installs on PATH (with the
+  resolution order), `JAVA_HOME` disagreeing with the first `java` on PATH, a CUDA toolkit against a
+  CPU-only PyTorch wheel, a GPU present while `torch.cuda.is_available()` is false, a project marker
+  whose toolchain is missing, a Node version below the project's `engines.node`, and a docker CLI
+  whose daemon is unreachable.
+- Secret redaction is applied at the envelope boundary (`ok`/`fail` in `src/errors/envelope.ts`), so
+  every tool result is sanitised and a warning states how many values were replaced. A
+  secret-bearing file is a second, stronger rule: `diagnose_failure` will not analyse `.env`-like
+  logs or read the source line at a location inside one — it reports that the file exists and says
+  why the content was withheld.
+- `review_diff` enforces `security.max_files_changed` / `security.max_lines_changed` and returns the
+  verdict as `data.changeLimits` plus staging advice in `warnings`. `0` means "no budget". A patch
+  artifact is redacted before it is written, so the file on disk is as safe as the response.
+
 ---
 
 ## Error code reference

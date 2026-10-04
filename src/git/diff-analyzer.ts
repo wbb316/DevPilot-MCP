@@ -3,7 +3,8 @@ import path from 'node:path';
 
 import { extractFile } from '../code/extract.js';
 import { languageOf } from '../workspace/file-walker.js';
-import { toPosix } from '../security/path-policy.js';
+import { isSensitiveFile, toPosix } from '../security/path-policy.js';
+import { redactSecrets } from '../security/redact.js';
 import { writeTextAtomic } from '../storage/json-store.js';
 import { EMPTY_TREE_SHA } from '../types/git.js';
 import type { ChangedFile, ChangedFileStatus, DiffReview, RiskLevel } from '../types/git.js';
@@ -322,12 +323,24 @@ export async function analyzeDiff(input: AnalyzeDiffInput): Promise<AnalyzeDiffO
   }
   if (truncated) review.truncated = true;
 
+  const sensitiveFiles = files.filter((file) => isSensitiveFile(file.path)).map((file) => file.path);
+  if (sensitiveFiles.length > 0) {
+    notes.push(
+      `${sensitiveFiles.length} changed path(s) look secret-bearing (${sensitiveFiles.slice(0, 5).join(', ')}): ` +
+        'their contents are never inlined — read them yourself if the change is intended',
+    );
+  }
+
   if (input.includePatch === true) {
     const patch = await git.diffPatchText(base, staged);
+    const safePatch = redactSecrets(patch);
     const relative = `.devpilot/logs/diff-${stampFor(new Date())}.patch`;
     const absolute = path.join(paths.logsDir, path.basename(relative));
-    await writeTextAtomic(absolute, patch);
+    await writeTextAtomic(absolute, safePatch.text);
     review.patchArtifact = toPosix(relative);
+    if (safePatch.matches > 0) {
+      notes.push(`${safePatch.matches} secret-like value(s) were redacted from the patch artifact`);
+    }
   }
 
   if (notes.length > 0) review.notes = notes;

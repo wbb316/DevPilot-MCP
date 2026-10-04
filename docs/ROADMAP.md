@@ -261,7 +261,27 @@ Gate evidence (34 test files / 270 tests, tool count 16 → 17; see docs/GATES.m
 directory targets; `includeTests: false` moves tests out of `affectedFiles` while keeping
 them in `relatedTests`; an unknown name answers `confidence: 'low'` instead of pretending.
 
-## Phase 9 — Security hardening + environment doctor
+## Phase 9 — Security hardening + environment doctor ✅ GATE PASSED
+
+Gate evidence (Phase 9 run): `tsc -p tsconfig.json` exit 0 and the full `vitest run` is
+**41 files / 332 tests passed** (Phase 8: 34/270).
+
+* Attack fixtures (`tests/integration/security-attack.test.ts`) 7/7: a log read outside the workspace
+  and a Windows **junction** that escapes it are both refused; `format C: /y`, `diskpart` and
+  `rm -rf /` return `COMMAND_NOT_ALLOWED` without spawning anything; `.env` yields its existence and
+  nothing else; a credential inside an ordinary log is redacted with a warning naming the rule kinds;
+  a two-file change set under `max_files_changed: 1` is flagged with staging advice.
+* `devpilot doctor` on the developer machine: git 2.51.1, node 22.23.2, npm 12.1.0, pnpm 11.23.0,
+  python 3.11.9 and 3.12.11, conda 22.9.0, java/javac 17.0.19, mvn 3.9.11, docker 29.1.3, wsl, nvcc 11.3,
+  torch 2.11.0+cpu → overall WARNING with four genuine conflicts (4 Pythons and 6 JDKs on PATH, a CUDA
+  toolkit paired with a CPU-only torch build, and a docker CLI whose daemon is not reachable).
+* Defects the gate found and fixed: containment was lexical only, so a junction inside the workspace
+  could still be read (now both sides are `realpath`ed); the dotenv redaction rule matched ordinary
+  code such as `access_token_expiry_seconds = 3600`; `poetry.lock`/`uv.lock` were fed to a YAML parser
+  although they are TOML, which silently reported zero transitives; Maven `<!-- -->` comments were
+  counted as dependencies; and a missing-lockfile issue was blamed on the alphabetically first
+  manifest instead of the one that declares dependencies.
+
 
 * Full command policy, workspace escape attempts blocked, secret masking (.env,
   credentials, private keys, tokens) — existence visible, contents withheld.

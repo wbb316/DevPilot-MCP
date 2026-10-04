@@ -2,7 +2,9 @@ import type { AnyToolDefinition } from '../server/tool-registry.js';
 import { buildProjectTool } from './build-project.js';
 import { closeWorkspaceTool } from './close-workspace.js';
 import { createCheckpointTool } from './create-checkpoint.js';
+import { dependencyAuditTool } from './dependency-audit.js';
 import { diagnoseFailureTool } from './diagnose-failure.js';
+import { doctorTool } from './doctor.js';
 import { findReferencesTool } from './find-references.js';
 import { findSymbolTool } from './find-symbol.js';
 import { getGitStatusTool } from './get-git-status.js';
@@ -23,8 +25,8 @@ import { scanProjectTool } from './scan-project.js';
  *
  * Phase 1: workspace lifecycle. Phase 2: project scan and project map. Phase 3: symbol and
  * reference search. Phase 4: build and run. Phase 5: test runner. Phase 6: failure diagnosis.
- * Phase 7: diff review and checkpoints. Phases 8–9 add impact_analysis, doctor and
- * dependency_audit.
+ * Phase 7: diff review and checkpoints. Phase 8: impact analysis. Phase 9: environment doctor and
+ * dependency audit.
  */
 export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   openWorkspaceTool,
@@ -44,6 +46,8 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   createCheckpointTool,
   rollbackCheckpointTool,
   impactAnalysisTool,
+  doctorTool,
+  dependencyAuditTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */
