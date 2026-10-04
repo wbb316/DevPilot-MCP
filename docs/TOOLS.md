@@ -70,6 +70,25 @@ Errors: `UNSUPPORTED_PROJECT` (no marker found and no source files), `LIMIT_EXCE
             dependsOn, usedBy }[], layers?: string[], notes: string[] }`
 Java projects additionally return a `layers` hint (`Controller → Service → Repository → DB`).
 
+Additions shipped with the implementation (additions are allowed, renames are not):
+
+* `scan_project` `data` also carries `languages` (files/bytes per language), `notes` and a
+  workspace-relative `cacheFile`. `stats` carries `fromCache`, `truncated`, `maxDepthReached`
+  and `skipped { oversized, symlinks, unreadable, excluded }`.
+* Cache semantics: the profile lives in `.devpilot/cache/project.json`. The cheap cache key
+  covers the workspace config, the tool arguments, the git HEAD and the **top level** of the
+  tree (names, sizes, mtimes — `.devpilot`, `.git` and `node_modules` excluded so that writing
+  the cache cannot invalidate it). A deep edit inside `src/` therefore needs `force: true`, or
+  Phase 3's per-file `mtime+size` index; every cache-hit response says so in `notes`.
+* Hitting `workspace.max_files` does **not** fail the call: `stats.truncated` is set, a warning
+  is attached and the profile covers what was walked. `LIMIT_EXCEEDED` stays reserved for
+  limits that make the requested operation impossible.
+* `get_project_map` `data` also carries `engine: 'heuristic-regex'` and `truncated`. `symbols`
+  holds names only (`Class.method` for methods); `depth` is the number of dependency-graph hops
+  explored around `focus`, and without a `focus` the whole (capped) module list is returned.
+  `layers` is emitted only for Java/Kotlin modules — a TypeScript file named `UserService` is
+  not a Spring service.
+
 ---
 
 ## Phase 3

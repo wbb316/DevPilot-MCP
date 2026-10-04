@@ -132,23 +132,29 @@ with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `PAT
 
 ## Status
 
-**Phase 1 — project skeleton, MCP server, workspace lifecycle: gate passed.**
+**Phase 2 — project scanner + project map: gate passed** (Phase 1: skeleton, MCP server,
+workspace lifecycle — also passed).
 
 ```text
 npm run build   clean (TypeScript strict)
-npm test        10 test files / 83 tests green, incl. a real MCP stdio integration test
-devpilot serve  an MCP client initializes, lists 3 tools, opens/closes a workspace
+npm test        15 test files / 120 tests green, incl. a real MCP stdio integration test
+devpilot serve  an MCP client initializes, lists 5 tools, opens/scans/maps a workspace
+devpilot scan   the DevPilot repo itself: 88 files / 420 KB in 38 ms, 2 ms on the cache hit
 ```
 
 Implemented so far: strict TS project · typed error model + result envelope · DevPilot
 home + per-workspace `.devpilot\` layout with atomic JSON state · zod-validated
 `config.yml` · path confinement, sensitive-file classification, limits, permission levels ·
 workspace manager (open / status / close, registry, project detection, git snapshot) ·
-MCP server with tool registry (`open_workspace`, `get_workspace_status`,
-`close_workspace`) · CLI (`init`, `status`, `serve`, `version`) · three fixture projects.
+ignore-aware file walker (own `.gitignore` engine, no external glob dependency) ·
+project scanner (profile, statistics, top-level map, `.devpilot/cache/project.json`) ·
+project map (entrypoints, modules, symbols, `dependsOn`/`usedBy` edges, Java layer hints) ·
+MCP server with tool registry (`open_workspace`, `get_workspace_status`, `close_workspace`,
+`scan_project`, `get_project_map`) · CLI (`init`, `scan`, `status`, `serve`, `version`) ·
+three fixture projects.
 
-Next: Phase 2 (`scan_project`, `get_project_map`). See
-[docs/ROADMAP.md](docs/ROADMAP.md) for per-phase gates.
+Next: Phase 3 (`find_symbol`, `find_references` — AST-backed symbol index with incremental
+`mtime+size` re-parsing). See [docs/ROADMAP.md](docs/ROADMAP.md) for per-phase gates.
 
 ## License
 

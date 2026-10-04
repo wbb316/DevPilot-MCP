@@ -94,6 +94,43 @@ Phase 1 decisions (additions to the plan, all reflected in the docs)
 Gate: scan the three fixtures (python / maven / node) and one real project; profile and
 map match hand-written expectations; second scan is fast (cache hit).
 
+Gate evidence
+```text
+npm run build   → clean (tsc strict, 0 errors)
+npm test        → 15 test files / 120 tests, all pass
+                  new: gitignore engine, file-walker (incl. symlink + oversize + include),
+                  scanner (3 fixtures, cache hit, force, polyglot, empty dir),
+                  project map (parser units, python/java/node edges, layers, focus, cap),
+                  tool layer (scan_project / get_project_map through the registry),
+                  real stdio MCP client: tools/list = 5 tools, open → scan → scan(cache) → map
+fixtures        → python: PyTorch/pytest, entrypoint train.py, 8 files
+                  maven : Java/maven, pom.xml, `mvn -q test`, 4 java files
+                  node  : npm, scripts → build/test/run, test/index.test.js depends on src/index.js
+real project    → the DevPilot repository itself (88 files, 37 dirs, 420 KB):
+                  detected "TypeScript/JavaScript/Python/Java / Node", markers package.json +
+                  tsconfig.json, `npm run build` / `npm test` / `npm start`, node_modules and
+                  dist excluded, first scan 38 ms → second scan 2 ms (cache hit)
+                  project map: 70 modules, entrypoint src/index.ts, 67 ms, edges verified by
+                  hand (open-workspace.ts → tool-registry/envelope/shared; usedBy tools/index.ts)
+CLI             → `devpilot scan <path>` text + `--json` + `--force`; cache reused across runs
+```
+
+Phase 2 decisions (additions to the plan, all reflected in the docs)
+* **Primary ecosystem rule.** Root markers decide which ecosystem owns a repository, source-file
+  counts break ties, and the winner supplies `projectType`/`buildSystem`/`testFramework` while
+  every detected language stays in `languages` (primary first). Without it the DevPilot repo —
+  whose `fixtures/` contain a Maven sample — was reported as Java/maven, which would have made
+  every inferred command wrong. Deterministic, never an LLM.
+* **`SCANNER_VERSION`** is part of the cache key and of the cache file: detection semantics change
+  with the code, the cache key only describes the tree, so a stale profile must not survive an
+  upgrade.
+* Cache honesty over cache cleverness: a top-level-only key is cheap and never wrong about
+  structure; deep edits are Phase 3's job (per-file `mtime+size`). The alternative — walking to
+  fingerprint — would have removed the entire benefit of the cache.
+* `.devpilot/`, `.git/` and `node_modules/` are excluded from the cache observation, otherwise
+  DevPilot's own writes (and `git status` touching `.git/index`) would invalidate every scan.
+* `layers` is Java/Kotlin-only; the TypeScript case is a regression test.
+
 ## Phase 3 — Symbol & reference index
 
 * `code/lang/*` adapters (Python/Java/TS-JS): classes, functions, methods, fields,

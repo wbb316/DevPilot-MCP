@@ -1,6 +1,7 @@
 import { DevPilotError } from '../errors/devpilot-error.js';
 import { VERSION } from '../version.js';
 import { initCommand } from './commands/init.js';
+import { scanCommand } from './commands/scan.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
 
@@ -22,13 +23,16 @@ Usage: devpilot <command> [options]
 Commands:
   init [path]        Create <path>/.devpilot/ (config.yml, cache, logs, checkpoints)
       --write-gitignore   also add ".devpilot/" to .gitignore
+  scan [path]        Scan the project into .devpilot/cache/project.json
+      --force             ignore the cache and rescan the whole tree
+      --json              machine-readable output
   status [path]      Show the detected project profile and git snapshot
       --json              machine-readable output
   serve              Start the MCP server on stdio (used by MCP clients)
   version            Print the version
   help               Show this help
 
-Not yet implemented (roadmap phases): scan (2), doctor (9), test (5)
+Not yet implemented (roadmap phases): test (5), doctor (9)
 `;
 
 interface ParsedArgv {
@@ -100,9 +104,14 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     case 'status':
       return statusCommand(io, { target: parsed.positionals[0] ?? io.cwd, json });
     case 'scan':
+      return scanCommand(io, {
+        target: parsed.positionals[0] ?? io.cwd,
+        force: parsed.flags.has('force'),
+        json,
+      });
     case 'doctor':
     case 'test': {
-      const phase = command === 'scan' ? 2 : command === 'test' ? 5 : 9;
+      const phase = command === 'test' ? 5 : 9;
       io.stderr(
         `devpilot ${command} is not implemented yet (roadmap Phase ${phase}). Start the server with \`devpilot serve\` and call the MCP tools instead.\n`,
       );

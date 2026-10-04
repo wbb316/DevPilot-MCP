@@ -86,14 +86,26 @@ describe('tool registry', () => {
     expect(JSON.parse(text)).toEqual(result.structuredContent);
   });
 
-  it('assembles the Phase 1 MCP server with its tools registered', async () => {
+  it('assembles the MCP server with the tools of the shipped phases registered', async () => {
     const context = await tempContext();
     const server = createMcpServer(context);
-    expect(listToolNames()).toEqual(['open_workspace', 'get_workspace_status', 'close_workspace']);
+    expect(listToolNames()).toEqual([
+      'open_workspace',
+      'get_workspace_status',
+      'close_workspace',
+      'scan_project',
+      'get_project_map',
+    ]);
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {},
     );
-    expect(registered.sort()).toEqual(['close_workspace', 'get_workspace_status', 'open_workspace']);
+    expect(registered.sort()).toEqual([
+      'close_workspace',
+      'get_project_map',
+      'get_workspace_status',
+      'open_workspace',
+      'scan_project',
+    ]);
     await server.close();
   });
 

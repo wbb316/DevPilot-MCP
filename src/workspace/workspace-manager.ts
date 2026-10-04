@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import type { DevPilotConfig } from '../config/config-schema.js';
 import type { Logger } from '../log/logger.js';
-import type { IndexState, OpenWorkspaceData, OpenWorkspaceOptions, PermissionLevel, WorkspacePaths, WorkspaceRegistry, WorkspaceRegistryEntry, WorkspaceState } from '../types/workspace.js';
+import type { IndexState, OpenWorkspaceData, OpenWorkspaceOptions, PermissionLevel, ProjectProfile, WorkspacePaths, WorkspaceRegistry, WorkspaceRegistryEntry, WorkspaceState } from '../types/workspace.js';
 import { PERMISSION_LEVELS } from '../types/workspace.js';
 import { errors } from '../errors/devpilot-error.js';
 import { GitManager } from '../git/git-manager.js';
@@ -250,6 +250,19 @@ export class WorkspaceManager {
 
   async listKnown(): Promise<WorkspaceRegistryEntry[]> {
     return (await this.readRegistry()).workspaces;
+  }
+
+  /**
+   * Record the outcome of a scan on the live session state (Phase 2). The tool layer calls
+   * this so `get_workspace_status` reports the full profile instead of the marker-level one
+   * produced at open time.
+   */
+  applyScan(id: string, profile: ProjectProfile, indexState: IndexState): void {
+    const entry = this.open.get(id);
+    if (entry === undefined) return;
+    entry.state.profile = profile;
+    entry.state.indexState = indexState;
+    entry.state.lastUsedAt = new Date().toISOString();
   }
 
   /** Resolve the workspace a tool call refers to, or throw a typed error. */

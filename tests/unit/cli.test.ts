@@ -64,10 +64,34 @@ describe('CLI', () => {
     expect(await runCli(['frobnicate'], unknown.io)).toBe(2);
     expect(unknown.err.join('')).toMatch(/Unknown command: frobnicate/);
 
-    const scan = capture(env, workspace);
-    expect(await runCli(['scan'], scan.io)).toBe(2);
-    expect(scan.err.join('')).toMatch(/Phase 2/);
+    const doctor = capture(env, workspace);
+    expect(await runCli(['doctor'], doctor.io)).toBe(2);
+    expect(doctor.err.join('')).toMatch(/Phase 9/);
   });
+
+  it('scans a project, prints the summary and reuses the cache', async () => {
+    const first = capture(env, workspace);
+    expect(await runCli(['scan', workspace], first.io)).toBe(0);
+    const output = first.out.join('');
+    expect(output).toMatch(/Type\s+: Python \/ PyTorch/);
+    expect(output).toMatch(/Files\s+: \d+ files/);
+    expect(output).toMatch(/Entrypoints : train\.py/);
+    expect(output).toMatch(/Cache\s+: \.devpilot\/cache\/project\.json/);
+
+    const json = capture(env, workspace);
+    expect(await runCli(['scan', workspace, '--json'], json.io)).toBe(0);
+    const payload = JSON.parse(json.out.join('')) as {
+      stats: { files: number; fromCache: boolean };
+      profile: { projectType: string };
+    };
+    expect(payload.profile.projectType).toBe('PyTorch');
+    expect(payload.stats.files).toBeGreaterThan(0);
+    expect(payload.stats.fromCache).toBe(true);
+
+    const forced = capture(env, workspace);
+    expect(await runCli(['scan', workspace, '--force'], forced.io)).toBe(0);
+    expect(forced.out.join('')).toMatch(/Cache bypassed|Note\s+: cache bypassed/);
+  }, 30_000);
 
   it('initialises a workspace and edits .gitignore only when asked', async () => {
     const first = capture(env, workspace);

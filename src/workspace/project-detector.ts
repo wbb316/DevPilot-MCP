@@ -17,6 +17,13 @@ export interface DetectProjectOptions {
   /** Walk caps keep detection bounded on huge repositories. */
   maxScanFiles?: number;
   maxDepth?: number;
+  /**
+   * Pre-computed, ignore-aware file list (workspace/file-walker). When present the internal
+   * walk is skipped, so `.gitignore` semantics live in exactly one place (docs/ROADMAP.md Phase 2).
+   */
+  files?: readonly string[];
+  /** true when the caller's walk hit its file cap. */
+  truncated?: boolean;
 }
 
 /** Order is stable on purpose: `markers` must be deterministic for equal trees. */
@@ -47,8 +54,33 @@ const MARKER_FILES: readonly string[] = [
   'docker-compose.yaml',
 ];
 
-const ENTRYPOINT_CANDIDATES: readonly string[] = [
-  'train.py',
+/** Marker ownership, used to decide which ecosystem owns a polyglot repository. */
+const NODE_MARKERS = new Set([
+  'package.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'tsconfig.json',
+]);
+const JAVA_MARKERS = new Set([
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'settings.gradle',
+  'settings.gradle.kts',
+  'gradlew',
+  'gradlew.bat',
+  'mvnw',
+]);
+const PYTHON_MARKERS = new Set([
+  'requirements.txt',
+  'pyproject.toml',
+  'setup.py',
+  'Pipfile',
+  'poetry.lock',
+]);
+
+const ENTRYPOINT_CANDIDATES: readonly string[] = [  'train.py',
   'sample.py',
   'main.py',
   'app.py',
@@ -329,8 +361,9 @@ export async function detectProject(
 ): Promise<ProjectProfile> {
   const root = path.resolve(rootInput);
   const exclude = options.config?.workspace.exclude ?? [...DEFAULT_EXCLUDES];
-  const scan = await scanTree(root, exclude, options.maxScanFiles ?? 5_000, options.maxDepth ?? 12);
-  const files = scan.files;
+  const files =
+    options.files ??
+    (await scanTree(root, exclude, options.maxScanFiles ?? 5_000, options.maxDepth ?? 12)).files;
 
   // Markers: only what actually exists, in the frozen order.
   const markers: string[] = [];
@@ -359,11 +392,61 @@ export async function detectProject(
   const node = detectNode(files, packageJson, lockfile);
 
   const languages = [...new Set([...python.languages, ...java.languages, ...node.languages])];
-  const buildSystem = java.buildSystem ?? node.buildSystem ?? python.buildSystem ?? 'none';
 
-  let projectType = java.projectType ?? node.projectType ?? python.projectType ?? 'Unknown';
-  const framework = java.framework ?? node.framework ?? python.framework;
-  const testFramework = python.testFramework ?? java.testFramework ?? node.testFramework ?? 'none';
+  // Which ecosystem owns this repository? Root markers decide, source-file counts break the
+  // tie. Without this rule a TypeScript repository whose `fixtures/` happen to contain a
+  // Maven sample is reported as a Java project, and every inferred command is then wrong.
+  // Deterministic on purpose (docs/ARCHITECTURE.md §4.8): never an LLM.
+  const sourceCount = (extensions: readonly string[]): number =>
+    files.filter((file) => extensions.some((extension) => file.endsWith(extension))).length;
+
+  const ecosystems = [
+    {
+      name: 'node',
+      present: node.languages.length > 0,
+      markers: markers.filter((marker) => NODE_MARKERS.has(marker)).length,
+      sources: sourceCount(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts']),
+      detected: node,
+      priority: 2,
+    },
+    {
+      name: 'java',
+      present: java.languages.length > 0,
+      markers: markers.filter((marker) => JAVA_MARKERS.has(marker)).length,
+      sources: sourceCount(['.java', '.kt', '.kts']),
+      detected: java,
+      priority: 1,
+    },
+    {
+      name: 'python',
+      present: python.languages.length > 0,
+      markers: markers.filter((marker) => PYTHON_MARKERS.has(marker)).length,
+      sources: sourceCount(['.py', '.pyi']),
+      detected: python,
+      priority: 0,
+    },
+  ];
+
+  const primary =
+    [...ecosystems]
+      .filter((ecosystem) => ecosystem.present)
+      .sort(
+        (a, b) => b.markers - a.markers || b.sources - a.sources || b.priority - a.priority,
+      )[0]?.name ?? 'none';
+  const chosen = ecosystems.find((ecosystem) => ecosystem.name === primary)?.detected;
+
+  // The primary ecosystem goes first so summaries read "TypeScript / Node", not "Java".
+  const orderedLanguages = [
+    ...(chosen?.languages ?? []),
+    ...languages.filter((language) => !(chosen?.languages ?? []).includes(language)),
+  ];
+
+  const FALLBACK_TYPE: Record<string, string> = { python: 'Python', java: 'Java', node: 'Node' };
+  const buildSystem = chosen?.buildSystem ?? 'none';
+
+  let projectType = chosen?.projectType ?? FALLBACK_TYPE[primary] ?? 'Unknown';
+  const framework = chosen?.framework;
+  const testFramework = chosen?.testFramework ?? 'none';
 
   if (options.config?.project.type) projectType = options.config.project.type;
 
@@ -384,7 +467,7 @@ export async function detectProject(
   const profile: ProjectProfile = {
     name: options.name ?? path.basename(root),
     root,
-    languages,
+    languages: orderedLanguages,
     projectType,
     entrypoints,
     markers,

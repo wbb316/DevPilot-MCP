@@ -63,14 +63,16 @@ describe('MCP server over stdio', () => {
     await removeDir(workspace);
   });
 
-  it('starts, lists the Phase 1 tools and opens a workspace', async () => {
+  it('starts, lists the shipped tools and opens a workspace', async () => {
     const { client, close } = await connect();
     try {
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
         'close_workspace',
+        'get_project_map',
         'get_workspace_status',
         'open_workspace',
+        'scan_project',
       ]);
       const openTool = listed.tools.find((tool) => tool.name === 'open_workspace');
       expect(openTool?.description ?? '').toMatch(/workspace/i);
@@ -108,6 +110,53 @@ describe('MCP server over stdio', () => {
       const closed = envelopeOf(await client.callTool({ name: 'close_workspace', arguments: {} }));
       expect(closed.success).toBe(true);
       expect(closed.data).toMatchObject({ closed: data.workspace.id, remainingOpen: 0 });
+    } finally {
+      await close();
+    }
+  }, 60_000);
+
+  it('scans the project and maps it over the real transport', async () => {
+    const { client, close } = await connect();
+    try {
+      const opened = envelopeOf(await client.callTool({ name: 'open_workspace', arguments: { path: workspace } }));
+      expect(opened.success).toBe(true);
+
+      const scan = envelopeOf(await client.callTool({ name: 'scan_project', arguments: {} }));
+      expect(scan.success).toBe(true);
+      const scanData = scan.data as {
+        profile: { projectType: string; entrypoints: string[] };
+        stats: { files: number; bytes: number; fromCache: boolean };
+        indexState: string;
+        cacheFile: string;
+      };
+      expect(scanData.profile.projectType).toBe('PyTorch');
+      expect(scanData.stats.files).toBeGreaterThan(0);
+      expect(scanData.stats.bytes).toBeGreaterThan(0);
+      expect(scanData.indexState).toBe('ready');
+      expect(scanData.cacheFile).toBe('.devpilot/cache/project.json');
+      await expect(fs.access(path.join(workspace, '.devpilot', 'cache', 'project.json'))).resolves.toBeUndefined();
+
+      const cached = envelopeOf(await client.callTool({ name: 'scan_project', arguments: {} }));
+      expect((cached.data as { stats: { fromCache: boolean } }).stats.fromCache).toBe(true);
+
+      const map = envelopeOf(
+        await client.callTool({ name: 'get_project_map', arguments: { includeTests: true } }),
+      );
+      expect(map.success).toBe(true);
+      const mapData = map.data as {
+        entrypoints: { path: string }[];
+        modules: { path: string; dependsOn: string[] }[];
+        engine: string;
+      };
+      expect(mapData.engine).toBe('heuristic-regex');
+      expect(mapData.entrypoints.map((entry) => entry.path)).toContain('train.py');
+      expect(mapData.modules.find((module) => module.path === 'train.py')?.dependsOn).toEqual([
+        'data.py',
+        'model.py',
+      ]);
+
+      const closed = envelopeOf(await client.callTool({ name: 'close_workspace', arguments: {} }));
+      expect(closed.success).toBe(true);
     } finally {
       await close();
     }
