@@ -247,3 +247,52 @@ expected [] to include 'src/app.py'                    ← nothing was restorabl
 - Line endings: `git apply` writes CRLF on a Windows checkout with `core.autocrlf=true`. That is
   git matching the surrounding tree, not a bug, so tests compare line content rather than bytes.
 
+## Phase 8 — impact analysis
+
+Commands (build before tests, so the stdio integration test spawns a fresh `dist/`):
+
+```text
+node node_modules/typescript/bin/tsc -p tsconfig.json   → exit 0
+node node_modules/vitest/vitest.mjs run                 → exit 0, 34 files / 270 tests passed
+```
+
+Phase 7 was 32 / 256. Tool count 16 → 17 (`impact_analysis`).
+
+Evidence, end to end through the tool registry on `fixtures/python-project`:
+
+- `CausalSelfAttention` → declaration `model.py:14`, `affectedFiles` contains `model.py`
+  (`declaration`) and `train.py`, `relatedTests` contains `tests/test_model.py`, `confidence`
+  `high`, `riskLevel` stated with reasons, and `notes` carrying the method plus the depth rule.
+- `model.py` (an existing path) → `targetKind: 'file'`, reason `target`, and `affectedSymbols`
+  listing the declarations inside it (`CausalSelfAttention`, `GPT`).
+- `tests` (an existing directory) → `targetKind: 'directory'`, members carrying
+  `directory_member`.
+- `includeTests: false`, `depth: 1`, `limit: 5` → tests leave `affectedFiles` but stay in
+  `relatedTests`, with a note explaining the separation.
+- An unknown name → `confidence: 'low'`, no `definition`, empty affected set, and the note that a
+  lexical index cannot see dynamic usage.
+
+Defect found by this gate — fixed in the implementation, not in the assertion:
+
+```text
+FAIL  tests/integration/impact-tool.test.ts > treats a directory as a directory target
+AssertionError: expected 'test' to be 'directory_member'
+```
+
+The `includeTests` branch relabelled **every** affected test file as `reason: 'test'`, overwriting
+the structural reason that answers "why is this file in the set" — a `directory_member` of the
+target directory, or a `reference` call site, both became `test`. The assertion was right and the
+implementation was wrong: test files are now added only when nothing else already explains them,
+and test-ness is carried by `relatedTests` alone.
+
+Behaviour pinned at this gate:
+
+- A target can never escape the workspace: `C:\…`, `/etc/…` and any `..` segment are refused
+  (unit-tested directly on `normalizeRelative`).
+- `affectedFiles[].reason` and `relatedTests` are independent dimensions and never overwrite each
+  other.
+- Risk rules are deterministic, always carry a reason, and `riskLevel` is their maximum — there is
+  no bare verdict anywhere in the output.
+- Every answer ends with the `method heuristic` note. A lexical index cannot resolve
+  receiver-typed calls, so the tool says that instead of implying compiler precision.
+

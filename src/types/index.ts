@@ -81,3 +81,16 @@ export type {
   RollbackCheckpointData,
 } from './git.js';
 export { EMPTY_TREE_SHA } from './git.js';
+
+export type {
+  AffectedConfidence,
+  AffectedFile,
+  AffectedReason,
+  AffectedSymbol,
+  ImpactDefinition,
+  ImpactMethod,
+  ImpactResult,
+  ImpactRisk,
+  ImpactRiskLevel,
+  ImpactTargetKind,
+} from './impact.js';

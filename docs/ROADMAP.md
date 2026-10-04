@@ -244,7 +244,7 @@ Two corrections the gate forced (both recorded in GATES.md):
   contained no hunk for it (a successful no-op). A path is now only restored when the snapshot —
   or, as a fallback, an actual patch hunk — covers it.
 
-## Phase 8 — Impact analysis
+## Phase 8 — Impact analysis  ✅ GATE PASSED
 
 * Combine definition/reference index, import graph, config references, test association.
 * Output: target(s), affected files, affected symbols, related tests, risk level,
@@ -254,6 +254,12 @@ Two corrections the gate forced (both recorded in GATES.md):
 
 Gate: modifying a class in the Maven fixture lists its callers and tests; a PyTorch
 fixture lists model/train/test blast radius with honest confidence labels.
+
+Gate evidence (34 test files / 270 tests, tool count 16 → 17; see docs/GATES.md Phase 8):
+`CausalSelfAttention` resolves to `model.py:14` with `train.py` in `affectedFiles` and
+`tests/test_model.py` in `relatedTests`; `model.py` and `tests` are recognised as file and
+directory targets; `includeTests: false` moves tests out of `affectedFiles` while keeping
+them in `relatedTests`; an unknown name answers `confidence: 'low'` instead of pretending.
 
 ## Phase 9 — Security hardening + environment doctor
 

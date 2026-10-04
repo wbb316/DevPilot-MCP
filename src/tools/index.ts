@@ -8,6 +8,7 @@ import { findSymbolTool } from './find-symbol.js';
 import { getGitStatusTool } from './get-git-status.js';
 import { getProjectMapTool } from './get-project-map.js';
 import { getWorkspaceStatusTool } from './get-workspace-status.js';
+import { impactAnalysisTool } from './impact-analysis.js';
 import { openWorkspaceTool } from './open-workspace.js';
 import { reviewDiffTool } from './review-diff.js';
 import { rollbackCheckpointTool } from './rollback-checkpoint.js';
@@ -42,6 +43,7 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   getGitStatusTool,
   createCheckpointTool,
   rollbackCheckpointTool,
+  impactAnalysisTool,
 ];
 
 /** Tool names grouped by delivery phase, used by the CLI and by tests. */

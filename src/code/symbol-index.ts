@@ -604,6 +604,15 @@ export class SymbolIndex {
     return this.symbolsByFile.get(record.id) ?? [];
   }
 
+  /** Workspace-relative path of every indexed file (impact analysis, directory targets). */
+  filePaths(): string[] {
+    return [...this.filesByPath.keys()];
+  }
+
+  hasFile(relativePath: string): boolean {
+    return this.filesByPath.has(relativePath);
+  }
+
   /** Resolved import edges, for the dependency view. */
   importEdges(): ImportEdge[] {
     const edges: ImportEdge[] = [];

@@ -78,6 +78,7 @@ describe('MCP server over stdio', () => {
         'get_git_status',
         'get_project_map',
         'get_workspace_status',
+        'impact_analysis',
         'open_workspace',
         'review_diff',
         'rollback_checkpoint',

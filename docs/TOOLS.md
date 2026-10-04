@@ -306,6 +306,34 @@ Notes fixed with Phase 7:
 `data`: `{ target, method: 'ast' | 'heuristic', confidence, affectedFiles[], affectedSymbols[],
            relatedTests[], risks[], riskLevel: 'HIGH'|'MEDIUM'|'LOW', notes[] }`
 
+Notes fixed with Phase 8:
+
+- `method` is `'heuristic'` in this build (`extractor: 'heuristic-regex'`): declarations, references
+  and import edges come from lexical extractors, so receiver-typed call resolution is out of scope.
+  Every answer ends with a note saying so — read it before treating the result as a call graph.
+- `targetKind` is resolved deterministically: an indexed file or an existing path/file wins, an
+  existing directory or an index prefix wins next, everything else is a symbol. A target that is
+  absolute or contains `..` is never treated as a path (it cannot leave the workspace).
+- The tool takes **no** `path` argument: it analyses the open workspace (the Phase 3 tools' `path`
+  means "filter results", Phase 4's means "select workspace" — this one has neither, so there is no
+  ambiguity to inherit).
+- `affectedFiles[].reason` answers *why the file is in the set*: `declaration`, `target`,
+  `reference`, `importer` (distance ≥ 1, `detail` names the imported file), `dependency`, `test`,
+  `directory_member`. Test-ness is a separate dimension carried by `relatedTests`; a test file that
+  references the target keeps `reference` rather than being relabelled.
+- `distance` counts import hops from the direct files (`depth`, default 2). `lines` lists up to 20
+  reference lines per file.
+- `affectedSymbols` holds the declarations involved: `reason: 'definition'` for the target's own
+  declarations, `'reference'` for the innermost scope enclosing each use.
+- Risks are a deterministic rule set and always carry a reason: ≥30 references HIGH, ≥10 MEDIUM;
+  a type declaration; same-name declarations; fan-in ≥ 10 importers HIGH; circular imports; a
+  build/config manifest HIGH; and "no test references this" MEDIUM. `riskLevel` is the maximum.
+- `confidence` is derived, never asserted: one exact declaration `high`, several or a fuzzy name
+  match `medium`, nothing found `low`; file targets are `high` when indexed, directory targets
+  `medium`.
+- Truncation is explicit: `truncated` plus a note (`limit` files listed, 200 directory members,
+  25 symbols per file target).
+
 ---
 
 ## Phase 9
