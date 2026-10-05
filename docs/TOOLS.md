@@ -102,7 +102,10 @@ Additions shipped with the implementation (additions are allowed, renames are no
   inside a package but imports a root-level module gets `runEnv: { PYTHONPATH: "." }`, because
   `python train/train.py` otherwise cannot import `model/...`. `sourceDirs` is discovered from the
   tree (source files per top-level directory, top 8) instead of only the fixed `src`/`app`/`lib`
-  list.
+  list. Both `open_workspace` and `scan_project` build this from the same `.gitignore`-aware walk,
+  so an ignored `review_bundle/` or `model_backup*/` can never be reported as an entrypoint or a
+  source directory — `open_workspace` used to run its own tree walk that only knew
+  `workspace.exclude`, which is how those two tools came to disagree about one project.
 
 ---
 

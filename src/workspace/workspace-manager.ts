@@ -10,12 +10,14 @@ import { errors } from '../errors/devpilot-error.js';
 import { GitManager } from '../git/git-manager.js';
 import { readBaseline, writeBaseline } from '../git/baseline.js';
 import { loadWorkspaceConfig } from '../config/config-loader.js';
+import { resolveLimits } from '../config/config-schema.js';
 import { capabilities, type SessionCapabilities } from '../security/permission.js';
 import { isInside, longestRootMatch, nodeErrorToDevPilot, normalizeForCompare } from '../security/path-policy.js';
 import { createLogger, silentLogger } from '../log/logger.js';
 import { devpilotHome, ensureDir, ensureHomeLayout, ensureWorkspaceLayout, globalConfigFile, registryFile, workspaceLogFile, workspacePaths } from '../storage/paths.js';
 import { readJson, writeJsonAtomic } from '../storage/json-store.js';
 import { detectProject } from './project-detector.js';
+import { walkWorkspace } from './file-walker.js';
 
 /**
  * Workspace lifecycle (docs/WORKSPACE-LIFECYCLE.md §2). The workspace is both the unit of
@@ -172,10 +174,28 @@ export class WorkspaceManager {
     });
     const config = loaded.config;
 
-    // 6. project detection (Phase 1: marker level)
+    // 6. project detection, fed by the ignore-aware walk exactly like `scan_project`.
+    // Detection used to run its own `.gitignore`-blind tree walk, so an ignored
+    // `review_bundle/` was reported as an entrypoint and an ignored `model_backup_*/` as a
+    // source directory (real-project run). `.gitignore` semantics live in file-walker alone.
+    const limits = resolveLimits(config);
+    const walk = await walkWorkspace({
+      root: realRoot,
+      exclude: config.workspace.exclude,
+      maxFiles: limits.maxFilesIndexed,
+      maxDepth: limits.walkMaxDepth,
+      maxFileSizeBytes: limits.maxFileSizeBytes,
+    });
+    if (walk.truncated) {
+      warnings.push(
+        `project detection saw the first ${walk.files.length} files only (workspace.max_files): the profile may be partial`,
+      );
+    }
     const profile = await detectProject(realRoot, {
       name: options.name ?? path.basename(realRoot),
       config,
+      files: walk.files.map((file) => file.path),
+      truncated: walk.truncated,
     });
 
     // 7. git snapshot — never fatal

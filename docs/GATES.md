@@ -546,11 +546,22 @@ with an AST index" note, `suspectFiles` listing `.devpilot` as recently-changed 
 data changes on every call), and `impact_analysis`'s summary answering "no declaration found" for a
 file target while `affectedSymbols` listed four declarations.
 
-Gate: `tsc --noEmit` → 0 errors, `tsc` → 0 errors, `vitest run` → **46 files / 369 tests pass**
-(365 before; 4 new regression tests). Re-verified against the real project in a fresh stdio session
-on the rebuilt dist (`tools/mcp-probe.mjs --steps-file=…`): 19 tools, handshake 385 ms, clean exit.
-The user's working tree afterwards: `git diff --stat` reports the one `.devpilot/` line they
-approved in `.gitignore` — nothing else.
+D4 `open_workspace` built its profile from a `.gitignore`-blind walk (found while re-verifying D1)
+   before  entrypoints held `review_bundle/speedup_code/train/train.py` and sourceDirs held
+           `model_backup_2026-09-06` — both excluded by the project's own `.gitignore`
+   after   the profile is fed by the same ignore-aware walk as `scan_project`
+           (`src/workspace/workspace-manager.ts`, step 6); entrypoints = train/train.py,
+           generate.py, app/server.py; sourceDirs = app, model, benchmark, train
+   cause   `detectProject` fell back to its internal `scanTree`, which only knows
+           `config.workspace.exclude`. Two tools disagreed about one project: `scan_project` was
+           right, `open_workspace` was wrong — and `open_workspace` runs first.
+
+Gate: `tsc --noEmit` → 0 errors, `tsc` → 0 errors, `vitest run` → **46 files / 370 tests pass**
+(365 before; 5 new regression tests, one per defect class). Re-verified against the real project in
+a fresh stdio session on the rebuilt dist (`tools/mcp-probe.mjs --steps-file=…`): 19 tools, handshake
+385 ms, clean exit; D4 re-checked in the live DSH session after an entry reload. The user's working
+tree afterwards: `git diff --stat` reports the one `.devpilot/` line they approved in `.gitignore` —
+nothing else.
 
 
 

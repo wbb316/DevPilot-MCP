@@ -66,6 +66,51 @@ describe('WorkspaceManager', () => {
     expect(result.workspace.git.dirty).toBe(false);
   });
 
+  /**
+   * Detection must read the same ignore-aware file list as `scan_project`. Running its own
+   * `.gitignore`-blind walk put an ignored `review_bundle/.../train.py` in `entrypoints` and an
+   * ignored `model_backup_<stamp>/` in `sourceDirs` (Phase 10 real-project run).
+   */
+  it('ignores .gitignore-excluded directories when building the profile', async () => {
+    // Own home and manager: this test opens a third workspace and must not shift the
+    // registry counts the surrounding cases assert.
+    const localHome = await makeTempDir('devpilot-wm-ignored-home-');
+    const localManager = new WorkspaceManager({
+      home: localHome,
+      logger: silentLogger(),
+      env: { ...process.env, DEVPILOT_HOME: localHome },
+    });
+    const project = await makeTempDir('devpilot-wm-ignored-');
+    try {
+      await writeFiles(project, {
+        '.gitignore': ['review_bundle/', 'model_backup*/', 'data/'].join('\n'),
+        'requirements.txt': 'torch>=2.1\npytest>=7.0\n',
+        'model/__init__.py': '',
+        'model/attention.py': 'class Attention:\n    pass\n',
+        'train/train.py':
+          'from model.attention import Attention\n\nif __name__ == "__main__":\n    Attention()\n',
+        'review_bundle/speedup_code/train/train.py': 'print("review bundle copy")\n',
+        'model_backup_2026-09-06/train/train.py': 'print("backup copy")\n',
+        'data/dataset.py': 'DATA = 1\n',
+      });
+
+      const result = await localManager.openWorkspace({ path: project });
+      const profile = result.workspace.profile;
+
+      expect(profile.entrypoints[0]).toBe('train/train.py');
+      expect(profile.entrypoints.some((entry) => entry.startsWith('review_bundle/'))).toBe(false);
+      expect(profile.entrypoints.some((entry) => entry.startsWith('model_backup'))).toBe(false);
+      expect(profile.sourceDirs).toContain('model');
+      expect(profile.sourceDirs).not.toContain('review_bundle');
+      expect(profile.sourceDirs.some((dir) => dir.startsWith('model_backup'))).toBe(false);
+      expect(profile.sourceDirs).not.toContain('data');
+      expect(profile.candidates.run).toBe('python train/train.py');
+    } finally {
+      await removeDir(project);
+      await removeDir(localHome);
+    }
+  }, 60_000);
+
   it('warns that .devpilot is missing from .gitignore', async () => {
     const result = await manager.openWorkspace({ path: workspace });
     expect(result.warnings.join(' ')).toMatch(/\.gitignore/);
