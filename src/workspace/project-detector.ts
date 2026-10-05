@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { DevPilotConfig } from '../config/config-schema.js';
 import { DEFAULT_EXCLUDES } from '../config/config-schema.js';
 import type { ProjectProfile } from '../types/workspace.js';
+import { isGeneratedAssetName } from './file-walker.js';
 
 /**
  * Rule-based project detection (docs/ARCHITECTURE.md §4.8 — deterministic, never LLM).
@@ -130,28 +131,231 @@ const ENTRYPOINT_NAMES: readonly string[] = [
 
 const MAX_DISCOVERED_ENTRYPOINTS = 8;
 
+/**
+ * Directories that hold examples, throwaways or web assets — never the project's entry point.
+ * The Phase 10 real-project run picked `scratch/main.py` (an MNIST toy) over the real training
+ * script and pulled `app/static/js/app.js` into the entrypoint list; both live here.
+ */
+const NON_ENTRY_DIRS: ReadonlySet<string> = new Set([
+  'scratch',
+  'tmp',
+  'temp',
+  'sandbox',
+  'playground',
+  'examples',
+  'example',
+  'demo',
+  'demos',
+  'static',
+  'public',
+  'assets',
+  'vendor',
+  'vendors',
+  'third_party',
+  'thirdparty',
+  'bower_components',
+  'docs',
+  'doc',
+  'notebooks',
+]);
+
+/** Names a framework makes primary — PyTorch's entry is the training script, not a web server. */
+const FRAMEWORK_ENTRYPOINTS: Record<string, readonly string[]> = {
+  PyTorch: ['train.py', 'pretrain.py', 'finetune.py', 'sample.py', 'generate.py', 'evaluate.py', 'main.py'],
+  FastAPI: ['main.py', 'app.py', 'server.py'],
+  Flask: ['app.py', 'main.py', 'server.py'],
+  Django: ['manage.py'],
+  'Next.js': ['index.ts', 'index.js', 'main.ts', 'main.js'],
+};
+
+const PY_MAIN_GUARD = /^\s*if\s+__name__\s*==\s*['"]__main__['"]/m;
+const JS_MAIN_GUARD = /require\.main\s*===\s*module|import\.meta\.main/;
+/** Only this many candidates get their contents read; the read itself is size-capped. */
+const ENTRY_PROBE_LIMIT = 12;
+const ENTRY_READ_LIMIT_BYTES = 2 * 1024 * 1024;
+
 function isTestPath(relative: string): boolean {
   if (/(^|\/)(tests?|spec|specs|__tests__)\//.test(relative)) return true;
   return /[._](test|spec)\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(relative);
 }
 
-/** Entry points discovered anywhere under the source tree, not only at the hard-coded paths. */
-function discoverEntrypoints(files: readonly string[], already: readonly string[]): string[] {
-  const seen = new Set(already);
-  const found: { path: string; rank: number; depth: number }[] = [];
-  for (const file of files) {
-    if (seen.has(file) || isTestPath(file)) continue;
-    const base = file.split('/').pop() ?? '';
-    const rank = ENTRYPOINT_NAMES.indexOf(base);
-    if (rank === -1) continue;
-    found.push({ path: file, rank, depth: file.split('/').length });
+function isNonEntryPath(relative: string): boolean {
+  const segments = relative.split('/');
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    if (segment !== undefined && NON_ENTRY_DIRS.has(segment.toLowerCase())) return true;
   }
-  found.sort(
+  return false;
+}
+
+/** Framework-preferred names sort before the generic list (which keeps its frozen order). */
+function rankOf(base: string, framework: string | undefined): number {
+  const preferred = framework === undefined ? undefined : FRAMEWORK_ENTRYPOINTS[framework];
+  const preferredRank = preferred?.indexOf(base) ?? -1;
+  if (preferredRank >= 0) return preferredRank;
+  const rank = ENTRYPOINT_NAMES.indexOf(base);
+  return rank === -1 ? -1 : 100 + rank;
+}
+
+async function readEntryText(root: string, relative: string): Promise<string | undefined> {
+  const absolute = path.join(root, ...relative.split('/'));
+  try {
+    const stats = await fs.stat(absolute);
+    if (stats.size > ENTRY_READ_LIMIT_BYTES) return undefined;
+    return await fs.readFile(absolute, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+export interface EntryDetail {
+  path: string;
+  /** The file runs something when executed (`if __name__ == "__main__"`, `require.main`). */
+  mainGuard: boolean;
+  /** Top-level modules this entry imports that exist at the workspace root. */
+  rootImports: string[];
+}
+
+/**
+ * Bounded inspection of the leading entry candidates: a file that executes under a main guard
+ * is a real entry, and an entry outside a package that imports root-level modules needs the
+ * root on `PYTHONPATH`.
+ */
+async function inspectEntrypoints(
+  root: string,
+  entrypoints: readonly string[],
+  files: readonly string[],
+): Promise<EntryDetail[]> {
+  const details: EntryDetail[] = [];
+  for (const entry of entrypoints) {
+    const text = await readEntryText(root, entry);
+    if (text === undefined) continue;
+    const rootImports: string[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const match = /^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
+      const name = match?.[1];
+      if (name === undefined) continue;
+      if (!files.includes(`${name}.py`) && !files.includes(`${name}/__init__.py`)) continue;
+      if (!rootImports.includes(name)) rootImports.push(name);
+    }
+    details.push({
+      path: entry,
+      mainGuard: PY_MAIN_GUARD.test(text) || JS_MAIN_GUARD.test(text),
+      rootImports,
+    });
+  }
+  return details;
+}
+
+interface EntryCandidate {
+  path: string;
+  rank: number;
+  depth: number;
+  mainGuard: boolean;
+}
+
+/** Entry points discovered anywhere under the source tree, not only at the hard-coded paths. */
+async function discoverEntrypoints(
+  root: string,
+  files: readonly string[],
+  already: readonly string[],
+  framework: string | undefined,
+): Promise<string[]> {
+  const seen = new Set(already);
+  const candidates: EntryCandidate[] = [];
+  for (const file of files) {
+    if (seen.has(file) || isTestPath(file) || isNonEntryPath(file)) continue;
+    if (isGeneratedAssetName(file)) continue;
+    const base = file.split('/').pop() ?? '';
+    const rank = rankOf(base, framework);
+    if (rank === -1) continue;
+    candidates.push({ path: file, rank, depth: file.split('/').length, mainGuard: false });
+  }
+  candidates.sort(
     (a, b) =>
       a.rank - b.rank || a.depth - b.depth || a.path.length - b.path.length || a.path.localeCompare(b.path),
   );
-  return found.slice(0, MAX_DISCOVERED_ENTRYPOINTS).map((entry) => entry.path);
+
+  const probed = candidates.slice(0, ENTRY_PROBE_LIMIT);
+  for (const candidate of probed) {
+    const text = await readEntryText(root, candidate.path);
+    if (text === undefined) continue;
+    candidate.mainGuard = PY_MAIN_GUARD.test(text) || JS_MAIN_GUARD.test(text);
+  }
+  probed.sort(
+    (a, b) =>
+      Number(b.mainGuard) - Number(a.mainGuard) ||
+      a.rank - b.rank ||
+      a.depth - b.depth ||
+      a.path.length - b.path.length ||
+      a.path.localeCompare(b.path),
+  );
+  return probed.slice(0, MAX_DISCOVERED_ENTRYPOINTS).map((entry) => entry.path);
 }
+
+/** Directories whose contents are data, output, docs or vendored code — never "source". */
+const NON_SOURCE_DIRS: ReadonlySet<string> = new Set([
+  'tests',
+  'test',
+  'spec',
+  'specs',
+  '__tests__',
+  'docs',
+  'doc',
+  'notebooks',
+  'data',
+  'data1',
+  'dataset',
+  'datasets',
+  'result',
+  'results',
+  'log',
+  'logs',
+  'checkpoints',
+  'scratch',
+  'tmp',
+  'temp',
+  'examples',
+  'demo',
+  'demos',
+  'review_bundle',
+  'build',
+  'dist',
+  'out',
+  'target',
+  'coverage',
+  'node_modules',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.idea',
+]);
+
+const SOURCE_EXT =
+  /\.(?:py|pyi|java|kt|kts|ts|tsx|mts|cts|js|jsx|mjs|cjs|c|cc|cpp|cxx|h|hpp|go|rs|cs|rb|php)$/i;
+
+/**
+ * Top-level source directories, counted rather than hard-coded. `SOURCE_DIR_CANDIDATES` only
+ * knows `src`/`app`/`lib`, so a project laid out as `model/` + `train/` reported a single
+ * source directory (the real-project run).
+ */
+function discoverSourceDirs(files: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    if (!SOURCE_EXT.test(file) || isGeneratedAssetName(file)) continue;
+    const segments = file.split('/');
+    if (segments.length < 2) continue;
+    const top = segments[0];
+    if (top === undefined || top.startsWith('.')) continue;
+    if (NON_SOURCE_DIRS.has(top.toLowerCase())) continue;
+    counts.set(top, (counts.get(top) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => (b[1] === a[1] ? (a[0] < b[0] ? -1 : 1) : b[1] - a[1]))
+    .slice(0, 8)
+    .map(([dir]) => dir);
+}
+
 
 /**
  * How to run a Python file. A file inside a package can only be started as `python -m pkg.mod`
@@ -525,8 +729,16 @@ export async function detectProject(
   if (options.config?.project.type) projectType = options.config.project.type;
 
   const rootEntrypoints = await existingRelative(root, ENTRYPOINT_CANDIDATES);
-  const entrypoints = [...rootEntrypoints, ...discoverEntrypoints(files, rootEntrypoints)];
-  const sourceDirs = await existingRelative(root, SOURCE_DIR_CANDIDATES);
+  const entrypoints = [
+    ...rootEntrypoints,
+    ...(await discoverEntrypoints(root, files, rootEntrypoints, framework ?? projectType)),
+  ];
+  const entryDetails = await inspectEntrypoints(root, entrypoints.slice(0, 3), files);
+  const fixedSourceDirs = await existingRelative(root, SOURCE_DIR_CANDIDATES);
+  const sourceDirs = [
+    ...fixedSourceDirs,
+    ...discoverSourceDirs(files).filter((dir) => !fixedSourceDirs.includes(dir)),
+  ];
   const testDirs = await existingRelative(root, TEST_DIR_CANDIDATES);
   const configDirs = await existingRelative(root, CONFIG_DIR_CANDIDATES);
 
@@ -534,6 +746,7 @@ export async function detectProject(
     buildSystem,
     framework,
     entrypoints,
+    entryDetails,
     files,
     testFramework,
     scripts: node.scripts,
@@ -581,6 +794,8 @@ interface CommandInputs {
   buildSystem: string;
   framework?: string;
   entrypoints: readonly string[];
+  /** Bounded inspection of the leading entries (main guard + root-level imports). */
+  entryDetails?: readonly EntryDetail[];
   files: readonly string[];
   testFramework: string;
   scripts: Record<string, string>;
@@ -636,6 +851,14 @@ function inferCommands(inputs: CommandInputs): {
         candidates.run = `${prefix}python ${target.target}`;
         if (target.pythonPath !== undefined) {
           candidates.runEnv = { PYTHONPATH: target.pythonPath };
+        } else if (entry.includes('/')) {
+          // Outside a package Python puts the *script's* directory on sys.path, so an entry
+          // like `train/train.py` cannot import `model/...` unless the root is on PYTHONPATH.
+          // Claimed only when the entry really imports a root-level module.
+          const detail = inputs.entryDetails?.find((candidate) => candidate.path === entry);
+          if (detail !== undefined && detail.rootImports.length > 0) {
+            candidates.runEnv = { PYTHONPATH: '.' };
+          }
         }
       }
       break;

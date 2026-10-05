@@ -16,7 +16,7 @@ import { pythonParser } from './lang/python.js';
  * results produced by an older rule set (Phase 10: the f-string fix needed this to take effect
  * on an already-indexed workspace).
  */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 const PARSERS: Record<string, LanguageParser> = {
   python: pythonParser,

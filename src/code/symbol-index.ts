@@ -330,6 +330,8 @@ export class SymbolIndex {
     let reused = 0;
     let parseErrors = 0;
     let refsTruncated = 0;
+    const refsTruncatedPaths: string[] = [];
+    const generatedSkipped: string[] = [];
     const unsupported = new Map<string, number>();
 
     for (const file of walk.files) {
@@ -338,6 +340,12 @@ export class SymbolIndex {
         continue;
       }
       if (!this.isIndexableLanguage(file, config)) continue;
+      // Minified/bundled/vendored assets are never project source: parsing them floods the
+      // per-file reference budget and puts generated declarations in the project map.
+      if (file.generated === true) {
+        generatedSkipped.push(file.path);
+        continue;
+      }
       seen.add(file.path);
 
       const stored = this.filesByPath.get(file.path);
@@ -375,7 +383,10 @@ export class SymbolIndex {
         record.parseError = result.parseError;
         parseErrors += 1;
       }
-      if (result.refsTruncated) refsTruncated += 1;
+      if (result.refsTruncated) {
+        refsTruncated += 1;
+        refsTruncatedPaths.push(file.path);
+      }
       this.replaceFile(record, result);
       parsedCount += 1;
     }
@@ -404,8 +415,15 @@ export class SymbolIndex {
     }
     if (parseErrors > 0) notes.push(`${parseErrors} file(s) failed to parse (see parseError on the file record)`);
     if (refsTruncated > 0) {
+      const named = refsTruncatedPaths.slice(0, 3).join(', ');
       notes.push(
-        `${refsTruncated} file(s) hit the per-file reference cap: references there are incomplete`,
+        `${refsTruncated} file(s) hit the per-file reference cap: references there are incomplete (${named}${refsTruncated > 3 ? ', …' : ''})`,
+      );
+    }
+    if (generatedSkipped.length > 0) {
+      const named = generatedSkipped.slice(0, 3).join(', ');
+      notes.push(
+        `${generatedSkipped.length} generated/minified asset file(s) skipped: not project source (${named}${generatedSkipped.length > 3 ? ', …' : ''})`,
       );
     }
     for (const [language, count] of unsupported) {

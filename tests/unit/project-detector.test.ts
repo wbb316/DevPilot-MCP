@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { projectProfileShape } from './project-detector.shape';
 import { detectProject } from '../../src/workspace/project-detector';
-import { copyFixture, makeTempDir, removeDir } from '../helpers/index';
+import { copyFixture, makeTempDir, removeDir, writeFiles } from '../helpers/index';
 
 /**
  * Detection is rule-based and must stay deterministic (docs/ARCHITECTURE.md §4.8).
@@ -39,6 +39,44 @@ describe('project detection', () => {
     expect(profile.testDirs).toContain('tests');
     expect(profile.candidates.test).toMatch(/pytest/);
     expect(profile.candidates.run).toMatch(/train\.py/);
+  });
+
+  /**
+   * The Phase 10 real-project layout: `model/` + `train/` + `scratch/` + `app/static/`.
+   * The old heuristics answered `python scratch/main.py` (an MNIST toy) and reported a single
+   * source directory, so the run command the agent was handed could not start the project.
+   */
+  it('prefers the framework entry point over a scratch script and finds every source dir', async () => {
+    const root = await makeTempDir('devpilot-detect-real-');
+    roots.push(root);
+    await writeFiles(root, {
+      'requirements.txt': 'torch>=2.1\npytest>=7.0\n',
+      'model/__init__.py': '',
+      'model/attention.py': 'class Attention:\n    pass\n',
+      'train/train.py':
+        'from model.attention import Attention\n\nif __name__ == "__main__":\n    Attention()\n',
+      'scratch/main.py': 'print("toy")\n\nif __name__ == "__main__":\n    pass\n',
+      'app/static/js/app.js': 'export function boot() {\n  return 1;\n}\n',
+      'docs/plot.py': 'import matplotlib\n',
+      'test/test_attention.py': 'from model.attention import Attention\n\n\ndef test_x():\n    assert Attention\n',
+    });
+
+    const profile = await detectProject(root, { name: 'real-shaped' });
+    projectProfileShape(profile);
+
+    expect(profile.projectType).toBe('PyTorch');
+    expect(profile.entrypoints[0]).toBe('train/train.py');
+    expect(profile.entrypoints).not.toContain('scratch/main.py');
+    expect(profile.entrypoints).not.toContain('app/static/js/app.js');
+    expect(profile.candidates.run).toBe('python train/train.py');
+    // The entry sits outside a package and imports `model`, so root must be on PYTHONPATH.
+    expect(profile.candidates.runEnv?.PYTHONPATH).toBe('.');
+
+    expect(profile.sourceDirs).toContain('model');
+    expect(profile.sourceDirs).toContain('train');
+    expect(profile.sourceDirs).not.toContain('scratch');
+    expect(profile.sourceDirs).not.toContain('docs');
+    expect(profile.sourceDirs).not.toContain('test');
   });
 
   it('recognises the Maven / JUnit fixture', async () => {

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { walkWorkspace } from '../../src/workspace/file-walker';
+import { walkWorkspace, isGeneratedAssetName, looksMinified } from '../../src/workspace/file-walker';
 import { makeTempDir, removeDir, writeFiles } from '../helpers/index';
 
 describe('walkWorkspace', () => {
@@ -97,4 +97,53 @@ describe('walkWorkspace', () => {
     expect(paths).toContain('ignored-dir/secret.txt');
     expect(result.gitignoreLayers).toBe(0);
   }, 30_000);
+});
+
+/**
+ * Phase 10's real-project run: a vendored `docs/.../echarts.min.js` consumed the whole
+ * per-file reference budget (800 refs) and its declarations entered the project map as if
+ * they were modules. Detection is by name first, then by shape — never by extension alone.
+ */
+describe('generated asset detection', () => {
+  let root: string;
+
+  beforeAll(async () => {
+    root = await makeTempDir('devpilot-asset-');
+    await writeFiles(root, {
+      'keep.py': 'print("keep")\n',
+      'app/static/js/app.js': 'export function boot() {\n  return 1;\n}\n',
+      'docs/report/echarts.min.js': 'var e=function(){return 1};\n',
+      'vendor/lib/thing.js': 'module.exports = 1;\n',
+      'docs/big.js': Array.from({ length: 6 }, (_, index) => `var a${String(index)}="${'y'.repeat(2000)}";`).join('\n'),
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await removeDir(root);
+  });
+
+  it('marks minified and vendored files, by name and by shape', async () => {
+    const result = await walkWorkspace({ root });
+    const byPath = new Map(result.files.map((file) => [file.path, file]));
+
+    expect(byPath.get('docs/report/echarts.min.js')?.generated).toBe(true);
+    expect(byPath.get('docs/report/echarts.min.js')?.generatedBy).toBe('name');
+    expect(byPath.get('vendor/lib/thing.js')?.generated).toBe(true);
+    expect(byPath.get('vendor/lib/thing.js')?.generatedBy).toBe('name');
+    expect(byPath.get('docs/big.js')?.generated).toBe(true);
+    expect(byPath.get('docs/big.js')?.generatedBy).toBe('shape');
+
+    // Ordinary hand-written code, including a static web asset, is never relabelled.
+    expect(byPath.get('app/static/js/app.js')?.generated).toBeUndefined();
+    expect(byPath.get('keep.py')?.generated).toBeUndefined();
+    expect(result.generated).toBe(3);
+  }, 30_000);
+
+  it('keeps the name and shape rules separable', () => {
+    expect(isGeneratedAssetName('docs/report/echarts.min.js')).toBe(true);
+    expect(isGeneratedAssetName('vendor/lib/thing.js')).toBe(true);
+    expect(isGeneratedAssetName('app/static/js/app.js')).toBe(false);
+    expect(looksMinified(`var a="${'y'.repeat(2000)}";`)).toBe(true);
+    expect(looksMinified('export function boot() {\n  return 1;\n}\n')).toBe(false);
+  });
 });

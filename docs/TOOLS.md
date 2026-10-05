@@ -88,6 +88,21 @@ Additions shipped with the implementation (additions are allowed, renames are no
   explored around `focus`, and without a `focus` the whole (capped) module list is returned.
   `layers` is emitted only for Java/Kotlin modules — a TypeScript file named `UserService` is
   not a Spring service.
+* **Generated/minified assets are not source.** `*.min.js`, `*.min.css`, `*.bundle.*`, `*.chunk.*`,
+  `*.umd.*`, anything under `vendor`/`vendors`/`third_party`/`bower_components`, and any `.js`/`.css`
+  of ≥ 8 KB whose head holds a line longer than 1 000 characters, are classified in the walk itself
+  (`WalkedFile.generated` / `generatedBy`). `scan_project` counts them in `notes`,
+  `get_project_map` does not list them as modules, and the symbol index skips them. Measured on a
+  real project: one vendored `echarts.min.js` had consumed the whole 800-reference per-file budget,
+  so index `refs` fell 8597 → 7797 (exactly 800) once it was excluded.
+* **Entrypoint and source-directory detection is evidence-based.** Files under `scratch/`, `tmp/`,
+  `examples/`, `sandbox/`, `static/`, `assets/`, `docs/` … are never entrypoints; an
+  `if __name__ == "__main__"` guard outranks a bare name match; the detected framework picks among
+  candidate names (PyTorch prefers `train.py` over `server.py`); and a Python entry that is not
+  inside a package but imports a root-level module gets `runEnv: { PYTHONPATH: "." }`, because
+  `python train/train.py` otherwise cannot import `model/...`. `sourceDirs` is discovered from the
+  tree (source files per top-level directory, top 8) instead of only the fixed `src`/`app`/`lib`
+  list.
 
 ---
 
@@ -130,7 +145,8 @@ Notes that apply to both Phase 3 tools:
 - The index refreshes incrementally on every call (mtime+size); `parsed: 0` means the tree
   was unchanged. `scan_project { force: true }` is the full-rebuild escape hatch.
 - Everything skipped is reported in `warnings` (unsupported language, oversized file, parse
-  error, per-file reference cap) — never dropped silently.
+  error, per-file reference cap — which now **names** the offending files —, generated/minified
+  asset) — never dropped silently.
 
 ---
 
@@ -368,6 +384,12 @@ Notes fixed with Phase 8:
 - `confidence` is derived, never asserted: one exact declaration `high`, several or a fuzzy name
   match `medium`, nothing found `low`; file targets are `high` when indexed, directory targets
   `medium`.
+- A **file** target matches declaration *names*, not receiver types. A hit counts when the
+  referencing file imports the target, or when that name is declared exactly once in the workspace;
+  a generic member (`__init__`, `forward`) reached from a non-importing file is not a reference to
+  this file. Dropped matches are counted in `notes` ("N name-only match(es) dropped …"), never
+  silently removed. Measured on the real project: 23 hits → 8 for `model/attention.py`, and 6 of the
+  15 removed were `super().__init__()` in unrelated modules.
 - Truncation is explicit: `truncated` plus a note (`limit` files listed, 200 directory members,
   25 symbols per file target).
 

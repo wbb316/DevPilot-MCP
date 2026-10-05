@@ -361,7 +361,12 @@ export async function buildProjectMap(options: BuildMapOptions): Promise<Project
     maxFileSizeBytes: limits?.maxFileSizeBytes ?? 2_097_152,
   });
 
-  const sourceFiles = walk.files.filter((file) => SOURCE_LANGUAGES.includes(file.language));
+  const generatedSkipped = walk.files.filter(
+    (file) => file.generated === true && SOURCE_LANGUAGES.includes(file.language),
+  );
+  const sourceFiles = walk.files.filter(
+    (file) => SOURCE_LANGUAGES.includes(file.language) && file.generated !== true,
+  );
   const testFiltered = sourceFiles.filter(
     (file) => options.includeTests === true || !isTestPath(options.profile, file.path),
   );
@@ -512,6 +517,14 @@ export async function buildProjectMap(options: BuildMapOptions): Promise<Project
   if (unresolved > 0) {
     notes.push(`${unresolved} import(s) resolve outside the workspace (standard library or third-party)`);
   }
+  if (generatedSkipped.length > 0) {
+    notes.push(
+      `${generatedSkipped.length} generated/minified asset file(s) are not mapped as modules (e.g. ${generatedSkipped
+        .slice(0, 3)
+        .map((file) => file.path)
+        .join(', ')})`,
+    );
+  }
   if (options.includeTests !== true) notes.push('test files are hidden; pass includeTests: true to map them');
 
   const layers = detectLayers(parsed, languageByPath);
@@ -519,7 +532,7 @@ export async function buildProjectMap(options: BuildMapOptions): Promise<Project
     entrypoints,
     modules: listed,
     notes: [
-      "engine: heuristic-regex — imports and symbols come from hand-written regexes, not a compiler; Phase 3 replaces this with an AST index",
+      'engine: heuristic-regex — imports and symbols come from hand-written regexes, not a compiler; find_symbol over the Phase 3 index is the precise view, this map stays a navigation aid',
       'config and documentation files are not listed as modules',
       ...notes,
     ],

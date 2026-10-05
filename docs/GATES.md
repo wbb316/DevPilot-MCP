@@ -497,8 +497,60 @@ change is the user's.
 **none of them is `mcp-devpilot`**. DSH reads profile plugin entries at harness start, so the entry
 written into `cordis.patch.yml` is present and schema-valid but not yet loaded by the running host.
 The stdio contract itself is proven independently (`tools/mcp-probe.mjs`: 19 tools, handshake, clean
-exit on stdin EOF), which is why the remaining step is a restart — a human action, not a DevPilot
-defect. Until that restart, acceptance item 1 is satisfied at config + process level only.
+exit on stdin EOF), so the missing tools were never a server-side failure.
+
+**Correction (2026-10-05).** This paragraph first blamed "a restart is still needed". That diagnosis
+was wrong, and the wrong version would have misled every future install: the row had been written as
+a bare `- id: mcp-devpilot`, and a top-level `- id:` line only *overrides* a row that some bundle
+already inserted — as a way to add a row it is a silent no-op. Written as `- insert:` the entry
+loaded at once (`@deepseek-ai/dsh-hmr` hot-loads the patch), and the live loader then reported
+`include:mcp-devpilot`, a stdio child process (`node dist/index.js serve`) and the 19
+`mcp__devpilot__*` tools in the model's own tool list. `docs/DSH-INTEGRATION.md` records the working
+form and the rebuild/reload procedure.
+
+## Post-V1 — hardening on a real project (2026-10-05)
+
+The first target that was *not* built for DevPilot was run read-only through the DSH bridge:
+`D:\WBB_Python\pytorch`, a MiniGPT training repo (316 files walked, 200 pytest cases green). The
+engineering loop held; the detection layer did not. Three defects were fixed, each with the
+measured before/after on that project:
+
+```text
+D1 entrypoint / run command / sourceDirs
+   before  entrypoints[0] = scratch/main.py (an MNIST toy) → run: python scratch/main.py
+   after   entrypoints = train/train.py, generate.py, app/server.py
+           run: python train/train.py     runEnv: { "PYTHONPATH": "." }
+           sourceDirs: ["app"] → ["app","model","benchmark","train"]
+   rules   throwaway/asset directories excluded; an `if __name__ == "__main__"` guard outranks a
+           bare name match; the framework decides among names (PyTorch → train.py over
+           server.py); an out-of-package Python entry that imports a root-level module gets
+           PYTHONPATH=. (without it `python train/train.py` cannot import `model/...`)
+
+D2 generated assets flooding the index
+   before  docs/report_output/v2_50M+1B/echarts.min.js held 800 refs (the entire per-file
+           budget) and 2 symbols, and was listed as a project module; the cap note did not name it
+   after   index files 114 → 113, symbols 3142 → 3140, refs 8597 → 7797 (exactly 800 dropped)
+           map modules 96 → 95; notes now name the file on both sides
+
+D3 a file target counting generic member names as references
+   before  model/attention.py: 23 references — including super().__init__() in model/rope.py,
+           model/layers.py and scratch/* — risk MEDIUM
+   after   8 references (model/gpt.py and test/test_attention.py kept by import adjacency, the
+           rest reached only as `importer` hops), risk LOW, note:
+           "5 name-only match(es) dropped: … generic members such as __init__ or forward match
+           everywhere"
+```
+
+Fixed in the same code paths because the run exposed them: the map's stale "Phase 3 replaces this
+with an AST index" note, `suspectFiles` listing `.devpilot` as recently-changed (DevPilot's own
+data changes on every call), and `impact_analysis`'s summary answering "no declaration found" for a
+file target while `affectedSymbols` listed four declarations.
+
+Gate: `tsc --noEmit` → 0 errors, `tsc` → 0 errors, `vitest run` → **46 files / 369 tests pass**
+(365 before; 4 new regression tests). Re-verified against the real project in a fresh stdio session
+on the rebuilt dist (`tools/mcp-probe.mjs --steps-file=…`): 19 tools, handshake 385 ms, clean exit.
+The user's working tree afterwards: `git diff --stat` reports the one `.devpilot/` line they
+approved in `.gitignore` — nothing else.
 
 
 

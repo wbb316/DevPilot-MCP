@@ -80,10 +80,16 @@ export const impactAnalysisTool = defineTool({
       ...(args.limit === undefined ? {} : { limit: args.limit }),
     });
 
+    // A file target has no single `definition` (that field carries the symbol target's
+    // declaration), so the summary counts the declarations the file itself holds — otherwise
+    // it said "no declaration found" while `data.affectedSymbols` listed four of them.
+    const declaredCount = result.affectedSymbols.filter((symbol) => symbol.reason === 'definition').length;
     const parts = [
       `${result.affectedFiles.length} of ${result.totalAffected} affected file(s)`,
       result.definition === undefined
-        ? 'no declaration found'
+        ? declaredCount > 0
+          ? `${declaredCount} declaration(s) in the target`
+          : 'no declaration found'
         : `declared at ${result.definition.path}:${result.definition.startLine}`,
       `${result.relatedTests.length} related test file(s)`,
     ];

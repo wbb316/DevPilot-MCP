@@ -51,6 +51,12 @@ export interface WalkedFile {
   size: number;
   mtimeMs: number;
   language: FileLanguage;
+  /**
+   * Minified/bundled/vendored asset (name or shape). Still listed — callers decide — but it
+   * is never project source: the index skips it and the map does not call it a module.
+   */
+  generated?: boolean;
+  generatedBy?: 'name' | 'shape';
 }
 
 export interface WalkOptions {
@@ -77,6 +83,8 @@ export interface WalkResult {
   bytes: number;
   truncated: boolean;
   skipped: { oversized: number; symlinks: number; unreadable: number; excluded: number };
+  /** Minified/bundled/vendored files seen in the walk (name or shape detection). */
+  generated: number;
   /** files and bytes per language, for the scanner's summary. */
   languages: Record<string, { files: number; bytes: number }>;
   gitignoreLayers: number;
@@ -148,6 +156,62 @@ export function languageOf(ext: string): FileLanguage {
   return LANGUAGE_BY_EXT[ext] ?? (ext === '' ? 'text' : 'other');
 }
 
+/**
+ * Minified, bundled or vendored assets are not project source, whatever their extension.
+ *
+ * Phase 10's first real-project run made the cost concrete: a vendored
+ * `docs/report_output/.../echarts.min.js` consumed the entire per-file reference budget
+ * (800 refs) and its declarations entered the project map as if they were modules.
+ * Detection is name-first, then shape; `.js` alone is never enough.
+ */
+const VENDOR_DIRS: ReadonlySet<string> = new Set([
+  'vendor',
+  'vendors',
+  'third_party',
+  'thirdparty',
+  'bower_components',
+]);
+
+export function isGeneratedAssetName(relativePath: string): boolean {
+  const segments = relativePath.split('/');
+  const name = segments[segments.length - 1] ?? relativePath;
+  if (/\.min\.(?:js|mjs|cjs|css)$/i.test(name)) return true;
+  if (/\.(?:bundle|chunk|umd|esm)\.(?:js|css)$/i.test(name)) return true;
+  return segments
+    .slice(0, -1)
+    .some((segment) => VENDOR_DIRS.has(segment.toLowerCase()));
+}
+
+/** A generated bundle is one gigantic line; hand-written code never is. */
+export function looksMinified(head: string): boolean {
+  for (const line of head.split('\n')) {
+    if (line.length > 1_000) return true;
+  }
+  return false;
+}
+
+const MINIFIED_PROBE_EXT: ReadonlySet<string> = new Set(['.js', '.mjs', '.cjs', '.css']);
+const MINIFIED_PROBE_MIN_BYTES = 8 * 1024;
+const MINIFIED_PROBE_HEAD = 64 * 1024;
+
+async function readHead(absolute: string, bytes: number): Promise<string | undefined> {
+  let handle;
+  try {
+    handle = await fs.open(absolute, 'r');
+  } catch {
+    return undefined;
+  }
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 /** Extensions whose contents are worth parsing as code (Phase 3 and the project map). */
 export const SOURCE_LANGUAGES: readonly FileLanguage[] = [
   'python',
@@ -205,6 +269,7 @@ export async function walkWorkspace(options: WalkOptions): Promise<WalkResult> {
   let bytes = 0;
   let truncated = false;
   let maxDepthReached = 0;
+  let generatedCount = 0;
 
   const queue: { absolute: string; relative: string; depth: number }[] = [
     { absolute: root, relative: '', depth: 0 },
@@ -290,6 +355,16 @@ export async function walkWorkspace(options: WalkOptions): Promise<WalkResult> {
 
       const ext = path.extname(entry.name).toLowerCase();
       const language = languageOf(ext);
+      let generatedBy: 'name' | 'shape' | undefined = isGeneratedAssetName(relative) ? 'name' : undefined;
+      if (
+        generatedBy === undefined &&
+        MINIFIED_PROBE_EXT.has(ext) &&
+        stats.size >= MINIFIED_PROBE_MIN_BYTES
+      ) {
+        const head = await readHead(absolute, MINIFIED_PROBE_HEAD);
+        if (head !== undefined && looksMinified(head)) generatedBy = 'shape';
+      }
+      if (generatedBy !== undefined) generatedCount += 1;
       files.push({
         path: relative,
         absolute,
@@ -298,6 +373,7 @@ export async function walkWorkspace(options: WalkOptions): Promise<WalkResult> {
         size: stats.size,
         mtimeMs: stats.mtimeMs,
         language,
+        ...(generatedBy === undefined ? {} : { generated: true, generatedBy }),
       });
       bytes += stats.size;
       const bucket = languages[language] ?? { files: 0, bytes: 0 };
@@ -315,6 +391,7 @@ export async function walkWorkspace(options: WalkOptions): Promise<WalkResult> {
     bytes,
     truncated,
     skipped,
+    generated: generatedCount,
     languages,
     gitignoreLayers: matcher.layerCount,
     durationMs: Date.now() - started,

@@ -7,7 +7,7 @@ import { silentLogger } from '../../src/log/logger';
 import { closeWorkspaceTool } from '../../src/tools/close-workspace';
 import { impactAnalysisTool } from '../../src/tools/impact-analysis';
 import { openWorkspaceTool } from '../../src/tools/open-workspace';
-import { copyFixture, makeTempDir, removeDir } from '../helpers/index';
+import { copyFixture, makeTempDir, removeDir, writeFiles } from '../helpers/index';
 
 interface Envelope<T> {
   success: boolean;
@@ -173,4 +173,56 @@ describe('impact_analysis through the registry (Phase 8)', () => {
     const closed = await invokeTool(context, closeWorkspaceTool, {});
     expect(closed.isError).toBe(false);
   });
+});
+
+/**
+ * A file target matches declaration *names*, not receiver types. The Phase 10 real-project run
+ * counted `super().__init__()` in unrelated modules as a reference to `model/attention.py`
+ * (6 of 23 hits) and inflated the blast radius. A hit now counts when the referencing file
+ * imports the target, or when the name is declared exactly once in the workspace.
+ */
+describe('impact_analysis over a file target with generic member names', () => {
+  let context: ServerContext;
+  let home: string;
+  let workspace: string;
+
+  beforeAll(async () => {
+    home = await makeTempDir('devpilot-impact2-home-');
+    workspace = await makeTempDir('devpilot-impact2-ws-');
+    await writeFiles(workspace, {
+      'requirements.txt': 'pytest>=7.0\n',
+      'model/__init__.py': '',
+      'model/attention.py':
+        'class Attention:\n    def __init__(self, dim):\n        self.dim = dim\n\n    def forward(self, x):\n        return x\n',
+      'model/gpt.py':
+        'from model.attention import Attention\n\n\nclass GPT:\n    def __init__(self):\n        self.attn = Attention(8)\n\n    def forward(self, x):\n        return self.attn.forward(x)\n',
+      'unrelated/other.py':
+        'class Other:\n    def __init__(self):\n        super().__init__()\n\n    def forward(self):\n        return super().__init__()\n',
+    });
+    context = await ServerContext.create({ home, logger: silentLogger() });
+  }, 60_000);
+
+  afterAll(async () => {
+    await context.dispose();
+    await removeDir(home);
+    await removeDir(workspace);
+  });
+
+  it('drops name-only matches of a generic member from a non-importing file', async () => {
+    const opened = await invokeTool(context, openWorkspaceTool, { path: workspace });
+    expect(opened.isError).toBe(false);
+
+    const result = await invokeTool(context, impactAnalysisTool, { target: 'model/attention.py' });
+    expect(result.isError).toBe(false);
+
+    const data = dataOf(result);
+    const paths = data.affectedFiles.map((file) => file.path);
+
+    expect(data.targetKind).toBe('file');
+    expect(paths).toContain('model/gpt.py');
+    expect(paths).not.toContain('unrelated/other.py');
+    expect(data.notes.some((note) => note.includes('name-only match'))).toBe(true);
+    // The summary counts the target's own declarations instead of claiming there are none.
+    expect(envelopeOf<ImpactData>(result).summary).toContain('declaration(s) in the target');
+  }, 60_000);
 });

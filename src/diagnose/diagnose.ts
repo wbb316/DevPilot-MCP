@@ -112,7 +112,14 @@ export function collectSuspects(input: SuspectInput): SuspectFile[] {
   };
 
   for (const location of input.locations) add(location.path, 'in_stack');
-  for (const file of input.changedFiles ?? []) add(file, 'recently_changed');
+  for (const file of input.changedFiles ?? []) {
+    // DevPilot's own workspace data (`.devpilot/`) is rewritten by nearly every tool call, so
+    // it always looks "recently changed": it must never be reported as a suspect (Phase 10
+    // real-project run listed it, and every entry crowded out a relevant one).
+    const normalized = file.replace(/\\/g, '/');
+    if (normalized === '.devpilot' || normalized.startsWith('.devpilot/')) continue;
+    add(file, 'recently_changed');
+  }
   if (input.importersOf !== undefined) {
     for (const location of input.locations) {
       for (const importer of input.importersOf(location.path)) add(importer, 'import_related');

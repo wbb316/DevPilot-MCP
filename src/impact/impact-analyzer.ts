@@ -305,6 +305,8 @@ export async function analyzeImpact(index: SymbolIndex, input: AnalyzeImpactInpu
   } else if (targetKind === 'file') {
     const relative = normalizeRelative(input.target) ?? input.target;
     const declared = index.symbolsInFile(relative);
+    const importersOfTarget = new Set(reverseImportMap(index).get(relative) ?? []);
+    let nameOnlyDropped = 0;
     affected.add({ path: relative, reason: 'target', confidence: 'high', distance: 0 });
     facts.declarationPaths.push(relative);
     if (declared.length === 0) {
@@ -317,19 +319,39 @@ export async function analyzeImpact(index: SymbolIndex, input: AnalyzeImpactInpu
     }
     for (const record of declared.slice(0, MAX_FILE_TARGET_SYMBOLS)) {
       const answer = await index.findReferences(record.name, { limit: DEFAULT_REFERENCE_LIMIT });
-      facts.referenceCount += answer.result.total;
       if (answer.result.truncated) facts.truncated = true;
+      // A file target matches a declaration *name*, not a receiver type. Generic member names
+      // (`__init__`, `forward`) are declared all over a project, so `super().__init__()` in an
+      // unrelated module was counted as a reference to this file and inflated the blast radius
+      // (Phase 10 real-project run). A hit counts when the referencing file imports the target,
+      // or when the name is declared exactly once in the workspace; everything else is counted
+      // and reported, never silently dropped.
+      const ambiguous =
+        index.findSymbols(record.name, { limit: 1, caseSensitive: true }).total > 1;
+      let kept = 0;
       for (const group of answer.grouped) {
         if (group.path === relative) continue;
+        const importAdjacent = importersOfTarget.has(group.path);
+        if (!importAdjacent && ambiguous) {
+          nameOnlyDropped += 1;
+          continue;
+        }
+        kept += group.count;
         facts.referenceFiles += 1;
         affected.add({
           path: group.path,
           reason: 'reference',
-          confidence: 'medium',
+          confidence: importAdjacent ? 'high' : 'medium',
           distance: 0,
           lines: group.lines.slice(0, MAX_LINES_PER_FILE),
         });
       }
+      facts.referenceCount += kept;
+    }
+    if (nameOnlyDropped > 0) {
+      notes.push(
+        `${nameOnlyDropped} name-only match(es) dropped: they share a declaration name with ${relative} but do not import it, and that name is declared in more than one file (generic members such as __init__ or forward match everywhere)`,
+      );
     }
   } else {
     const prefix = `${(normalizeRelative(input.target) ?? input.target).replace(/\/+$/, '')}/`;

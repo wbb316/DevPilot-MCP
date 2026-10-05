@@ -29,7 +29,7 @@ import { detectProject } from './project-detector.js';
  * Bump when detection/walk semantics change: the cache key covers the *tree*, not this code,
  * so without a version a smarter detector would keep serving profiles built by the old rules.
  */
-export const SCANNER_VERSION = 4;
+export const SCANNER_VERSION = 5;
 
 export interface ScanStats {  files: number;
   dirs: number;
@@ -342,6 +342,11 @@ export async function scanProject(options: ScanProjectOptions): Promise<ScanResu
   }
   if (walk.skipped.symlinks > 0) {
     notes.push(`${walk.skipped.symlinks} symlink(s) skipped (never followed)`);
+  }
+  if (walk.generated > 0) {
+    notes.push(
+      `${walk.generated} generated/minified asset file(s) detected: they stay out of the symbol index and the project map`,
+    );
   }
 
   const profile = await detectProject(root, {
