@@ -115,6 +115,45 @@ describe('checkpoints and rollback against a real repository', () => {
     }
   }, 60_000);
 
+  it('snapshots and restores a path whose name git would quote (CJK + space)', async () => {
+    const root = await makeTempDir('devpilot-ck-cjk-');
+    try {
+      const relative = 'docs/文档 说明.md';
+      const absolute = path.join(root, 'docs', '文档 说明.md');
+      await writeFiles(root, { [relative]: ORIGINAL });
+      const init = await gitInit(root);
+      if (!init.available) return;
+      const paths = workspacePaths(root);
+      await ensureWorkspaceLayout(paths);
+      const git = new GitManager({ cwd: root });
+
+      // A pre-existing edit makes the file dirty, so the checkpoint has to snapshot it. Before the
+      // fix the octal-escaped name never matched a file on disk and it was recorded patch-only.
+      await fs.writeFile(absolute, ORIGINAL.replace('line 2', 'line 2 CJK-EDIT'), 'utf8');
+      const atCheckpoint = normalize(await readText(absolute));
+
+      const created = await createCheckpoint({ paths, git, kind: 'manual', label: 'cjk path' });
+      expect(created.checkpoint.files).toContain(relative);
+      expect(created.checkpoint.snapshotSkipped ?? []).toEqual([]);
+      expect(created.snapshotted).toBe(created.checkpoint.files.length);
+      expect(created.note).toContain('snapshotted 1 of 1');
+
+      const snapshot = await readText(
+        path.join(paths.checkpointsDir, created.checkpoint.id, 'files', 'docs', '文档 说明.md'),
+      );
+      expect(normalize(snapshot)).toBe(atCheckpoint);
+
+      // Edit the same region again: only a content snapshot can undo this.
+      await fs.writeFile(absolute, ORIGINAL.replace('line 2', 'line 2 EDITED-AFTER'), 'utf8');
+      const real = await rollbackCheckpoint({ paths, git, checkpointId: created.checkpoint.id });
+      expect(real.restored).toContain(relative);
+      expect(real.skipped).toEqual([]);
+      expect(normalize(await readText(absolute))).toBe(atCheckpoint);
+    } finally {
+      await removeDir(root);
+    }
+  }, 60_000);
+
   it('records a clean tree as a checkpoint with nothing to restore', async () => {
     const repo = await repository();
     if (repo === undefined) return;

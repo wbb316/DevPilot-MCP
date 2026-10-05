@@ -57,19 +57,36 @@ export const reviewDiffTool = defineTool({
     });
 
     const review: DiffReview = result.review;
-    const changeLimits = checkChangeLimits(review.totals, resolveLimits(config));
+    // The budget governs what the agent changed. Pre-existing user work stays visible in
+    // files/totals/preExistingChanges but must never be counted against the agent's budget.
+    const preExisting = new Set(review.preExistingChanges);
+    const agentFiles = review.files.filter((file) => !preExisting.has(file.path));
+    const agentTotals = {
+      files: agentFiles.length,
+      addedLines: agentFiles.reduce((sum, file) => sum + file.addedLines, 0),
+      deletedLines: agentFiles.reduce((sum, file) => sum + file.deletedLines, 0),
+    };
+    const excludedPreExisting = review.files.length - agentFiles.length;
+    const changeLimits = checkChangeLimits(agentTotals, resolveLimits(config), excludedPreExisting);
     const summary =
       review.totals.files === 0
         ? 'no changes against the base'
         : `${review.totals.files} file(s) changed, +${review.totals.addedLines} -${review.totals.deletedLines}, risk ${review.riskLevel}` +
           `${review.highRisk.length === 0 ? '' : `, ${review.highRisk.length} high-risk file(s)`}` +
           `${review.affectedTests.length === 0 ? '' : `, ${review.affectedTests.length} test file(s) touched`}` +
-          `${changeLimits.exceeded ? ', change budget exceeded' : ''}`;
+          `${excludedPreExisting === 0 ? '' : `, ${excludedPreExisting} pre-existing path(s) not counted`}` +
+          `${changeLimits.exceeded ? ', change budget exceeded (agent changes)' : ''}`;
 
     const artifacts: Record<string, string> = {};
     if (review.patchArtifact !== undefined) artifacts['patch'] = review.patchArtifact;
 
     const warnings = [...(review.notes ?? [])];
+    if (excludedPreExisting > 0) {
+      warnings.push(
+        `${excludedPreExisting} changed path(s) pre-date this session (preExistingChanges): they stay ` +
+          'in files/totals but are excluded from the change budget',
+      );
+    }
     if (changeLimits.advice !== undefined) warnings.push(changeLimits.advice);
 
     return ok(summary, { ...review, changeLimits }, {

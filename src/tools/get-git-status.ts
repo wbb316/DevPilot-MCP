@@ -5,6 +5,7 @@ import { ok } from '../errors/envelope.js';
 import { GitManager } from '../git/git-manager.js';
 import { CheckpointStore } from '../git/checkpoint-store.js';
 import { readBaseline } from '../git/baseline.js';
+import { legacyPathCandidate } from '../git/git-path.js';
 import { requireWorkspaceContext } from './scan-project.js';
 import { workspacePathSchema } from './shared.js';
 
@@ -51,6 +52,14 @@ export const getGitStatusTool = defineTool({
     const baseline = await readBaseline(paths);
     const store = new CheckpointStore(paths);
 
+    // A baseline written before the path-decoding fix stores CJK names in git's escaped form; a
+    // decoded candidate counts only when it names a path that is currently changed.
+    const baselineChanged = new Set(baseline?.changed ?? []);
+    for (const file of baseline?.changed ?? []) {
+      const candidate = legacyPathCandidate(file);
+      if (candidate !== undefined && changedFiles.includes(candidate)) baselineChanged.add(candidate);
+    }
+
     const notes: string[] = [];
     if (baseline === undefined) {
       notes.push('no baseline was captured for this workspace: preExisting cannot be decided');
@@ -68,7 +77,7 @@ export const getGitStatusTool = defineTool({
       dirty: changedFiles.length + untracked.length > 0,
       changedFiles,
       untracked,
-      preExisting: baseline === undefined ? false : changedFiles.some((file) => baseline.changed.includes(file)),
+      preExisting: baseline === undefined ? false : changedFiles.some((file) => baselineChanged.has(file)),
       devpilotCheckpoints: await store.count(),
     };
 

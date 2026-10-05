@@ -12,7 +12,11 @@ import type { WorkspacePaths } from '../types/workspace.js';
 import type { Logger } from '../log/logger.js';
 import { assessRisk, isTestPath, maxRisk, RISK_ORDER } from './risk.js';
 import { readBaseline } from './baseline.js';
+import { unquoteGitPath, legacyPathCandidate } from './git-path.js';
 import type { GitManager } from './git-manager.js';
+
+/** Re-exported for the modules that already import it from here (`patch.ts`, unit tests). */
+export { unquoteGitPath } from './git-path.js';
 
 /**
  * `review_diff`'s engine (docs/TOOLS.md Phase 7).
@@ -44,33 +48,6 @@ export interface AnalyzeDiffOutcome {
 const DEFAULT_MAX_FILES = 200;
 const MAX_SYMBOL_FILE_BYTES = 2_097_152;
 const MAX_CHANGED_SYMBOLS_PER_FILE = 50;
-
-/** git quotes paths containing controls/whitespace and escapes them C-style. */
-export function unquoteGitPath(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) return trimmed;
-  const body = trimmed.slice(1, -1);
-  let out = '';
-  for (let i = 0; i < body.length; i += 1) {
-    const ch = body[i] as string;
-    if (ch !== '\\') {
-      out += ch;
-      continue;
-    }
-    const next = body[i + 1];
-    if (next === undefined) break;
-    if (/[0-7]/.test(next)) {
-      const octal = body.slice(i + 1, i + 4);
-      out += String.fromCharCode(Number.parseInt(octal, 8));
-      i += 3;
-      continue;
-    }
-    const escapes: Record<string, string> = { n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\' };
-    out += escapes[next] ?? next;
-    i += 1;
-  }
-  return out;
-}
 
 /** `-M` renders renames as `old => new` or `{old => new}` inside a shared prefix. */
 export function resolveRenameSpec(spec: string): string {
@@ -300,12 +277,33 @@ export async function analyzeDiff(input: AnalyzeDiffInput): Promise<AnalyzeDiffO
   for (const file of files) riskLevel = maxRisk(riskLevel, file.risk);
 
   const baseline = await readBaseline(paths);
+  const recoveredBaseline: string[] = [];
   const preExistingChanges =
     baseline === undefined
       ? []
-      : [...baseline.changed, ...baseline.untracked].filter((file) => paths0.has(file)).sort();
+      : [...baseline.changed, ...baseline.untracked]
+          .map((file) => {
+            if (paths0.has(file)) return file;
+            // A baseline written before the path-decoding fix holds git's octal escapes as if they
+            // were literal path segments. A decoded candidate is accepted only when it names a path
+            // that really is in this change set, because a numeric segment is ambiguous.
+            const candidate = legacyPathCandidate(file);
+            if (candidate !== undefined && paths0.has(candidate)) {
+              recoveredBaseline.push(candidate);
+              return candidate;
+            }
+            return file;
+          })
+          .filter((file) => paths0.has(file))
+          .sort();
   if (baseline === undefined && files.length > 0) {
     notes.push('no baseline was captured when this workspace was opened: preExistingChanges is empty');
+  } else if (recoveredBaseline.length > 0) {
+    notes.push(
+      `${recoveredBaseline.length} baseline path(s) were stored in the pre-fix escaped form and were ` +
+        'recovered by matching real paths: delete .devpilot/cache/git-baseline.json and reopen the ' +
+        'workspace to rewrite the baseline',
+    );
   }
 
   const review: DiffReview = {

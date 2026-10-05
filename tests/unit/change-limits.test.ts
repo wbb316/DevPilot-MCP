@@ -42,4 +42,23 @@ describe('change budget enforcement', () => {
     );
     expect(verdict.exceeded).toBe(false);
   });
+
+  it('echoes what it really counted and how much pre-existing work it left out', () => {
+    const verdict = checkChangeLimits({ files: 2, addedLines: 10, deletedLines: 4 }, DEFAULT_LIMITS, 72);
+    expect(verdict.exceeded).toBe(false);
+    expect(verdict.counted).toEqual({ files: 2, addedLines: 10, deletedLines: 4 });
+    expect(verdict.excludedPreExisting).toBe(72);
+    expect(verdict.changedLines).toBe(14);
+  });
+
+  it('says in the staging advice that an excluded path is not counted', () => {
+    const verdict = checkChangeLimits(
+      { files: DEFAULT_LIMITS.maxFilesChanged + 1, addedLines: 1, deletedLines: 0 },
+      DEFAULT_LIMITS,
+      30,
+    );
+    expect(verdict.exceeded).toBe(true);
+    expect(verdict.advice).toContain('stage the work');
+    expect(verdict.advice).toContain('30 pre-existing path(s) were excluded');
+  });
 });

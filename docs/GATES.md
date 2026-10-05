@@ -563,5 +563,51 @@ a fresh stdio session on the rebuilt dist (`tools/mcp-probe.mjs --steps-file=…
 tree afterwards: `git diff --stat` reports the one `.devpilot/` line they approved in `.gitignore` —
 nothing else.
 
+### D5 non-ASCII paths silently dropped out of rollback coverage
+
+```text
+before  create_checkpoint on the same real project:
+        "snapshotted 48 of 71 changed file(s) … 23 file(s) could not be snapshotted and are
+         patch-only", and the recorded names were mangled: docs/report_output/v2_35M+1B//344/272/…
+after   "snapshotted 61 of 71 … 10 file(s) … patch-only" — and the 10 remaining are structurally
+        unsnapshottable (1 deleted file + 9 untracked directories), not name failures
+cause   GitManager.pathStatuses() stripped the quotes from git's quoted form and then mapped `\` to
+        `/`, so the C-style octal escapes (docs/\346\226\207…) survived as literal path segments.
+        fs.stat() on that name always failed → the file was recorded patch-only → a rollback would
+        have skipped it without saying so. Fixed by decoding bytes → UTF-8 (`src/git/git-path.ts`)
+        and by reading `status --porcelain=v1 -z`, where git never quotes or escapes a path.
+proof   48 + 13 = 61 exactly: the 13 files the fix recovered are the 13 whose names carry CJK, and
+        the red/green pair comes from stashing only git-manager.ts and watching the new CJK
+        checkpoint test fail (`expected [ Array(1) ] to include 'docs/文档 说明.md'`).
+```
+
+### D6 the change budget charged pre-existing work to the agent
+
+```text
+before  one line changed on that project → "71 file(s) changed, +10143 -180, risk HIGH …
+        change budget exceeded (72 > 20; 5195 > 3000)": the user's own 72 uncommitted paths were
+        blamed on the agent, which is how a budget becomes noise the agent learns to ignore
+after   the budget counts the agent's change set only. `changeLimits.counted` states what was
+        counted, `changeLimits.excludedPreExisting` how many paths were left out, and a warning says
+        so; files / totals / preExistingChanges still list every changed path. The trade-off is
+        written down rather than hidden: an agent edit to an already-dirty file is not counted either
+
+D6b a stale baseline kept the escaped names (found while re-verifying D6)
+    found  58 of 71 paths were excluded but 13 CJK paths were still charged (5145 lines);
+           58 + 13 = 71
+    cause  .devpilot/cache/git-baseline.json had been written by the pre-fix parser, so its CJK
+           entries no longer matched any path on disk
+    after  read-time recovery: a decoded candidate is accepted only when it names a path that really
+           is in the current change set, and a note tells the user to delete the baseline and reopen.
+           A slash-form group counts as an escape only when the byte cannot be ASCII, because `/150`
+           is also `h` — that ambiguity was found by a test of mine failing, and the fix was in the
+           implementation, not in the assertion
+```
+
+Gate for D5/D6/D6b: `tsc --noEmit` → 0 errors and `vitest run` → **50 files / 388 tests pass**
+(46 files / 370 tests before this round). The before/after numbers above were produced in the live
+DSH session on the rebuilt dist after an entry reload (`include:mcp-devpilot`, new pid), not by a
+throwaway probe: the same project, the same workspace, the same baseline.
+
 
 

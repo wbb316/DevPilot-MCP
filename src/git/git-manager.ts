@@ -227,13 +227,24 @@ export class GitManager {
   /** porcelain status keyed by workspace-relative POSIX path. */
   async pathStatuses(): Promise<Map<string, string>> {
     const map = new Map<string, string>();
-    for (const line of await this.statusPorcelain()) {
-      const xy = line.slice(0, 2);
-      const raw = line.slice(3).trim();
+    // `-z` is the machine-readable form: git never quotes or escapes a path there, and a rename
+    // record carries the original name as its own NUL-terminated field. The line-based v1 format
+    // would force us to unescape C-style bytes and to guess whether " -> " is a rename separator
+    // or part of a file name.
+    const result = await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=normal'], {
+      allowFailure: true,
+    });
+    if (result.exitCode !== 0) return map;
+    const records = result.stdout.split('\0');
+    for (let i = 0; i < records.length; i += 1) {
+      const record = records[i] as string;
+      if (record.trim() === '') continue;
+      const xy = record.slice(0, 2);
+      const raw = record.slice(3);
+      // A rename/copy record is `XY <new>\0<old>\0`: the extra field must be consumed.
+      if (xy.startsWith('R') || xy.startsWith('C')) i += 1;
       if (raw === '') continue;
-      const renamed = raw.includes(' -> ') ? raw.split(' -> ')[1] : raw;
-      const normalized = (renamed ?? raw).replace(/^"|"$/g, '').split(path.sep).join('/');
-      map.set(normalized, xy);
+      map.set(raw.split(path.sep).join('/'), xy);
     }
     return map;
   }

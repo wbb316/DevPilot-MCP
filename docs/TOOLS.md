@@ -433,6 +433,18 @@ Notes fixed with Phase 9:
 - `review_diff` enforces `security.max_files_changed` / `security.max_lines_changed` and returns the
   verdict as `data.changeLimits` plus staging advice in `warnings`. `0` means "no budget". A patch
   artifact is redacted before it is written, so the file on disk is as safe as the response.
+- The budget is charged to the **agent's** change set. Paths listed in `preExistingChanges` stay in
+  `files` / `totals` but are excluded from `changeLimits.counted`, and
+  `changeLimits.excludedPreExisting` reports how many were left out (a warning repeats it, and the
+  staging advice says so when the budget is exceeded). Found on a real project where 72 pre-existing
+  paths turned a one-line change into "change budget exceeded" plus `risk HIGH`. The trade-off is
+  stated rather than hidden: an agent edit to an already-dirty file is not counted either.
+- Git-reported paths are decoded from git's quoted form as **bytes, then UTF-8**
+  (`src/git/git-path.ts`), and `GitManager.pathStatuses()` reads `status --porcelain=v1 -z`, where git
+  never quotes or escapes a path and a rename carries its original name as its own field. Before that
+  fix a CJK path was decoded one byte per character into mojibake, `create_checkpoint` could not stat
+  it, the file was recorded patch-only, and a rollback silently skipped it — 23 such files on one real
+  project, the exact count the checkpoint note reported as "patch-only".
 
 ---
 
