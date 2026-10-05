@@ -1,6 +1,6 @@
 {
   "name": "devpilot-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local software engineering runtime for AI coding agents.",
   "license": "MIT",
   "type": "module",

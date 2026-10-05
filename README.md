@@ -143,6 +143,7 @@ with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `BUI
 | [docs/GATES.md](docs/GATES.md) | the gate log: real commands, real output, and the mistakes that were corrected |
 | [docs/DSH-INTEGRATION.md](docs/DSH-INTEGRATION.md) | wiring into DeepSeek Harness, and how to reload the entry after a rebuild |
 | [docs/VERIFY.md](docs/VERIFY.md) | how to verify DevPilot yourself: four channels, expected output, failure codes, boundaries |
+| [CHANGELOG.md](CHANGELOG.md) | what changed per release, with the evidence for each fix |
 
 ## Status
 
@@ -153,9 +154,9 @@ blessed and an end-to-end run proved wrong.
 
 ```text
 tsc -p tsconfig.json --noEmit   clean (strict); src and tests are both typechecked
-vitest run                      46 test files / 365 tests green (~26 s)      (2026-10-05)
-npm run smoke                   SMOKE PASS, self-hosting: 201 files scanned, 3,945 symbols,
-                                13,312 refs; repeated call parsed=0 reused=172
+vitest run                      50 test files / 388 tests green (~20 s)      (2026-10-05)
+npm run smoke                   SMOKE PASS, self-hosting: 207 files scanned, 4,089 symbols,
+                                13,965 refs; repeated call parsed=0 reused=177
 stack acceptance                node 13/13 and maven 13/13, exit 0 each; the Python loop was also
                                 run on a real Git project through the DeepSeek Harness bridge
 doctor                          Git, Node, Python+pytest, JDK 17 + Maven all detected on this machine
