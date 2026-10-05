@@ -74,25 +74,34 @@ npm test
 npm run dev -- serve        # start the MCP server on stdio
 ```
 
-CLI:
+CLI (the MCP server is the product; the CLI is for humans, and for isolating a fault from the bridge):
 
 ```text
-devpilot init [dir]     initialize .devpilot/ in a workspace (config.yml, cache, logs, checkpoints)
-devpilot status [dir]   workspace status: type, languages, git state, index state
-devpilot scan [dir]     scan + index the project (Phase 2+)
-devpilot doctor         environment diagnosis (Phase 9)
-devpilot serve          run the MCP server (stdio)
-devpilot version        print version
+devpilot init [dir]        create <dir>\.devpilot\ (--write-gitignore to also edit .gitignore)
+devpilot status [dir]      profile + git snapshot (--json)
+devpilot scan [dir]        scan into .devpilot/cache/project.json (--force, --json)
+devpilot test [dir]        run the detected suite, printed as parsed counts
+                           (--filter=<expr>, --file=<path>, --fail-fast, --json)
+devpilot diagnose [dir]    classify the last failed job (--job=<id>, --log=<file>, --max-evidence=<n>)
+devpilot doctor [dir]      report the local toolchain; never installs anything (--verbose, --json)
+devpilot serve             run the MCP server on stdio (what DeepSeek Harness spawns)
+devpilot version | help
 ```
 
-## V1 tool set
+Exit codes: `0` success · `1` tests failed / none collected / run unverified · `2` a typed
+DevPilot error (`devpilot <CODE>: message`, never a stack trace).
+
+## Tool set
+
+19 tools, each returning the same envelope:
 
 ```text
-open_workspace   get_workspace_status   close_workspace
-scan_project     get_project_map
-find_symbol      find_references
-run_project      run_tests
-diagnose_failure review_diff
+workspace   open_workspace   get_workspace_status   close_workspace
+understand  scan_project     get_project_map        find_symbol        find_references
+analyze     impact_analysis  dependency_audit       doctor
+execute     build_project    run_project            run_tests          run_test
+diagnose    diagnose_failure
+git         get_git_status   create_checkpoint      rollback_checkpoint  review_diff
 ```
 
 10 reliable tools beat 40 half-finished ones. Gradle support is secondary; Python,
@@ -109,7 +118,7 @@ Maven, Node come first. Everything returns one stable envelope:
 ```
 
 Failures return `{ "success": false, "error": { "code": "TEST_FAILED", "message": "...", "details": {}, "hint": "..." } }`
-with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `PATH_OUTSIDE_WORKSPACE`, ...).
+with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `BUILD_FAILED`, ...).
 
 ## Design principles
 
@@ -117,8 +126,10 @@ with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `PAT
 2. **Local first** — no cloud, no account, code/Git/environment data never uploaded.
 3. **Safe by default** — workspace-restricted paths, command allow/deny policy, timeouts, output limits, file-change limits.
 4. **Reversible** — checkpoints, diffs, guarded rollback; never `git reset --hard` over user work.
-5. **Evidence based** — build output, tests, benchmark, diff and logs instead of "should work".
-6. **No wheel reinvention** — Git, Tree-sitter, ripgrep, Maven, Gradle, pytest, npm are used as backends.
+5. **Evidence based** — build output, tests, diff and logs instead of "should work".
+6. **No wheel reinvention** — Git, Maven, Gradle, pytest, npm are driven as backends. The language
+   parsers sit behind a `LanguageParser` seam, so Tree-sitter or ripgrep can replace today's
+   lexical extractors without changing a single tool contract.
 
 ## Documentation
 
@@ -129,38 +140,42 @@ with codes an agent can branch on (`WORKSPACE_NOT_OPEN`, `COMMAND_TIMEOUT`, `PAT
 | [docs/TOOLS.md](docs/TOOLS.md) | MCP tool schemas, envelopes, error codes, permission levels |
 | [docs/WORKSPACE-LIFECYCLE.md](docs/WORKSPACE-LIFECYCLE.md) | workspace state machine, `.devpilot` layout, concurrency, Git safety |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phase 1–10 plan, per-phase gates, V1 acceptance criteria |
+| [docs/GATES.md](docs/GATES.md) | the gate log: real commands, real output, and the mistakes that were corrected |
+| [docs/DSH-INTEGRATION.md](docs/DSH-INTEGRATION.md) | wiring into DeepSeek Harness, and how to reload the entry after a rebuild |
+| [docs/VERIFY.md](docs/VERIFY.md) | how to verify DevPilot yourself: four channels, expected output, failure codes, boundaries |
 
 ## Status
 
-**Phase 3 — symbol & reference index: gate passed** (Phase 1 skeleton/workspace lifecycle and
-Phase 2 scanner/project map also passed).
+**All ten phases are implemented and gated; V1 is usable, not just startable.** Each phase was
+closed only after a real build and test run passed — [docs/GATES.md](docs/GATES.md) records the
+commands, the observed output and the corrections, including one restore mechanism that unit tests
+blessed and an end-to-end run proved wrong.
 
 ```text
 tsc -p tsconfig.json --noEmit   clean (strict); src and tests are both typechecked
-npm test                        19 test files / 146 tests green
-npm run smoke                   self-hosting (this repo as target): 87 files indexed,
-                                1694 symbols, 5854 refs; SymbolIndex → src/code/symbol-index.ts:152;
-                                39 refs to DevPilotError in 4 files; second call parsed=0 reused=87
-2000-file synthetic project     first index 472 ms; re-query 56 ms (parsed=0 reused=2000)
+vitest run                      46 test files / 365 tests green (~26 s)      (2026-10-05)
+npm run smoke                   SMOKE PASS, self-hosting: 201 files scanned, 3,945 symbols,
+                                13,312 refs; repeated call parsed=0 reused=172
+stack acceptance                node 13/13 and maven 13/13, exit 0 each; the Python loop was also
+                                run on a real Git project through the DeepSeek Harness bridge
+doctor                          Git, Node, Python+pytest, JDK 17 + Maven all detected on this machine
 ```
 
-Implemented so far: strict TS project · typed error model + result envelope · DevPilot
-home + per-workspace `.devpilot\` layout with atomic JSON state · zod-validated
-`config.yml` · path confinement, sensitive-file classification, limits, permission levels ·
-workspace manager (open / status / close, registry, project detection, git snapshot) ·
-ignore-aware file walker (own `.gitignore` engine, no external glob dependency) ·
-project scanner (profile, statistics, top-level map, `.devpilot/cache/project.json`) ·
-project map (entrypoints, modules, symbols, `dependsOn`/`usedBy` edges, Java layer hints) ·
-symbol index (Python/Java/TypeScript/JavaScript lexical extractors behind a `LanguageParser`
-seam, real scope end-lines, per-file `mtime+size` incrementality, SQLite store
-`.devpilot/devpilot.db` with a JSON fallback, reference kinds + resolved import edges) ·
-MCP server with tool registry (`open_workspace`, `get_workspace_status`, `close_workspace`,
-`scan_project`, `get_project_map`, `find_symbol`, `find_references`) ·
-CLI (`init`, `scan`, `status`, `serve`, `version`) · `npm run smoke` end-to-end script ·
-three fixture projects.
+Implemented: strict TS project · typed error model + result envelope · DevPilot home and
+per-workspace `.devpilot\` layout · zod-validated `config.yml` · security layer (workspace
+confinement, command policy, change budgets, secret redaction, protected files) · workspace manager
+(open / status / close, registry, project detection, git snapshot) · ignore-aware file walker
+(own `.gitignore` engine) · project scanner + project map · symbol index (Python / Java / TS / JS
+lexical extractors behind a `LanguageParser` seam, per-file `mtime+size` incrementality, SQLite
+store with a JSON fallback) · process runner with timeouts and output caps · build runner · run
+runner · test runner (pytest, unittest, Surefire/Gradle, jest, vitest, node:test) with structured
+parsing · failure diagnosis · git diff review with risk classification · checkpoints and guarded
+rollback · impact analysis · environment doctor · dependency audit · MCP server with 19 tools ·
+CLI · fixtures and acceptance drivers under `tools/`.
 
-Next: Phase 4 (`build_project`, `run_project` — the single process gate with timeouts,
-output caps and per-run logs). See [docs/ROADMAP.md](docs/ROADMAP.md) for per-phase gates.
+Not in V1: benchmark, semantic/embedding search, Gradle real-machine acceptance, non-Windows
+acceptance. [docs/VERIFY.md](docs/VERIFY.md) §7 lists the boundaries explicitly, so a green run is
+never read as more than it is.
 
 ## License
 
